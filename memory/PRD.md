@@ -15,8 +15,7 @@ BARDI/Tuya smart door lock (kode akses temporer). UI Bahasa Indonesia, tema dark
 - **Karyawan**: cari barang → booking → dapat kode pintu + receipt → kembalikan.
 - **Admin**: approve/reject via web dashboard atau Telegram inline button; monitor overdue, akses, log.
 
-## Implemented (2026-06)
-- Auth JWT (cookie httpOnly) + role user/admin, seeding admin & demo user, brute-force lockout.
+## Implemented (2026-06)- Auth JWT (cookie httpOnly) + role user/admin, seeding admin & demo user, brute-force lockout.
 - Inventory CRUD + status AVAILABLE/BOOKED/BORROWED/MAINTENANCE, foto unik per barang.
 - Booking: konflik/double-booking dicegah, maintenance memblok booking, cek booking bentrok milik user.
 - Approve otomatis: Calendar event → access code (buffer configurable) → receipt → notifikasi user & admin.
@@ -29,8 +28,14 @@ BARDI/Tuya smart door lock (kode akses temporer). UI Bahasa Indonesia, tema dark
 - Telegram bot: webhook secret verification, admin whitelist, inline button approve/reject/return/extend/access, command /home /pending /overdue /akses /barang.
 
 ## Status integrasi
-Telegram, WhatsApp, Tuya/BARDI, Google Calendar berjalan **mode SIMULASI** (kredensial `.env` kosong).
-Isi env terkait untuk mengaktifkan tanpa perubahan kode.
+- **Telegram: LIVE** — @DataEquipmentTrackerbot, grup admin "Alat" (`-1003912804350`), webhook + secret.
+- WhatsApp (Meta Cloud API): kode siap, mode SIMULASI sampai `WHATSAPP_PHONE_NUMBER_ID` + `WHATSAPP_ACCESS_TOKEN` diisi. Catatan: Meta **tidak mendukung grup**, jadi WA dipakai untuk notif ke nomor user peminjam.
+- Google Calendar: kode siap (service account), butuh `GOOGLE_SERVICE_ACCOUNT_JSON` + `GOOGLE_CALENDAR_ID=yncrewcalendar@gmail.com` yang di-share ke email service account.
+- BARDI/Tuya: mode SIMULASI sampai `TUYA_ACCESS_ID/SECRET/DEVICE_ID` diisi.
+
+## Laporan (2026-06)
+Tab "Laporan" di admin + command Telegram `/laporan`: barang paling sering dipinjam,
+peminjam teraktif, user sering terlambat, grafik tren (7/30/90 hari), export CSV & PDF.
 
 ## Backlog
 - P1: isi kredensial nyata + set Telegram webhook; kirim receipt via email/WhatsApp.

@@ -368,6 +368,62 @@ async def confirm_return(booking: dict, admin_name: str, damaged: bool = False) 
     return await booking_detail(booking)
 
 
+# ------------------------------------------------------------------------ reports
+async def build_report(days: int = 30) -> dict:
+    since = now_utc() - timedelta(days=days)
+    bookings = [b async for b in db.bookings.find({"created_at": {"$gte": since}})]
+    item_names = {}
+    async for i in db.items.find():
+        item_names[str(i["_id"])] = i["name"]
+
+    item_counts, user_counts, late_counts, trend = {}, {}, {}, {}
+    returned = overdue = 0
+    for b in bookings:
+        for item_id in b.get("item_ids", []):
+            name = item_names.get(item_id, "?")
+            item_counts[name] = item_counts.get(name, 0) + 1
+        user_counts[b["user_name"]] = user_counts.get(b["user_name"], 0) + 1
+        day = parse_dt(b["created_at"]).astimezone(timezone(timedelta(hours=7))).strftime("%Y-%m-%d")
+        trend[day] = trend.get(day, 0) + 1
+        if b["status"] == STATUS_RETURNED:
+            returned += 1
+        was_late = b["status"] == STATUS_OVERDUE or (
+            b.get("returned_at") and parse_dt(b["returned_at"]) > parse_dt(b["end_time"])
+        )
+        if was_late:
+            overdue += 1
+            late_counts[b["user_name"]] = late_counts.get(b["user_name"], 0) + 1
+
+    top = lambda d, key: sorted([{"name": k, "count": v} for k, v in d.items()], key=lambda x: -x["count"])
+    return {
+        "days": days,
+        "totals": {"bookings": len(bookings), "returned": returned, "overdue": overdue,
+                   "items": await db.items.count_documents({}), "users": await db.users.count_documents({})},
+        "top_items": top(item_counts, "count")[:10],
+        "top_users": top(user_counts, "count")[:10],
+        "late_users": top(late_counts, "count")[:10],
+        "trend": [{"date": d, "count": trend[d]} for d in sorted(trend)],
+    }
+
+
+async def report_csv_rows(days: int = 30):
+    since = now_utc() - timedelta(days=days)
+    item_names = {}
+    async for i in db.items.find():
+        item_names[str(i["_id"])] = i["name"]
+    rows = [["Booking", "Peminjam", "Barang", "Mulai", "Selesai", "Status", "Dikembalikan", "Terlambat"]]
+    async for b in db.bookings.find({"created_at": {"$gte": since}}).sort("created_at", -1):
+        late = "Ya" if (b["status"] == STATUS_OVERDUE or (
+            b.get("returned_at") and parse_dt(b["returned_at"]) > parse_dt(b["end_time"]))) else "Tidak"
+        rows.append([
+            f"#{b['code']}", b["user_name"],
+            "; ".join(item_names.get(i, "?") for i in b.get("item_ids", [])),
+            fmt(parse_dt(b["start_time"])), fmt(parse_dt(b["end_time"])), b["status"],
+            fmt(parse_dt(b["returned_at"])) if b.get("returned_at") else "-", late,
+        ])
+    return rows
+
+
 # ------------------------------------------------------------------------ schedule
 async def run_scheduler_once():
     now = now_utc()

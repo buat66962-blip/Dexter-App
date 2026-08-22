@@ -325,7 +325,7 @@ class TestTelegramWebhook:
         # create a fresh booking
         items = user.get(f"{API}/items").json()
         item = [i for i in items if i["status"] == "AVAILABLE"][0]
-        start = datetime.now(timezone.utc) + timedelta(days=10)
+        start = datetime.now(timezone.utc) + timedelta(days=45)
         r = user.post(f"{API}/bookings", json={
             "item_ids": [item["id"]],
             "start_time": _iso(start), "end_time": _iso(start + timedelta(hours=1)),
@@ -336,7 +336,7 @@ class TestTelegramWebhook:
         # send approve callback via webhook (no admin_ids configured => any chat allowed)
         r2 = requests.post(f"{API}/telegram/webhook",
                            json={"update_id": 3, "callback_query": {
-                               "id": "cb1", "from": {"id": 1234}, "data": f"approve:{bid}",
+                               "id": "cb1", "from": {"id": -1003912804350}, "data": f"approve:{bid}",
                            }},
                            headers={"X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET})
         assert r2.status_code == 200
@@ -344,3 +344,120 @@ class TestTelegramWebhook:
         r3 = admin.get(f"{API}/admin/bookings", params={"status": "APPROVED"})
         ids = [b["id"] for b in r3.json()]
         assert bid in ids
+
+
+# ---------- reports (iteration 2)
+class TestReports:
+    def test_user_cannot_access_reports(self, user):
+        r = user.get(f"{API}/admin/reports", params={"days": 30})
+        assert r.status_code == 403
+
+    def test_user_cannot_export(self, user):
+        r = user.get(f"{API}/admin/reports/export", params={"days": 30})
+        assert r.status_code == 403
+
+    def test_reports_30_days_structure(self, admin):
+        r = admin.get(f"{API}/admin/reports", params={"days": 30})
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["days"] == 30
+        for k in ["bookings", "returned", "overdue", "items", "users"]:
+            assert k in data["totals"], f"missing totals.{k}"
+        assert isinstance(data["top_items"], list)
+        assert isinstance(data["top_users"], list)
+        assert isinstance(data["late_users"], list)
+        assert isinstance(data["trend"], list)
+
+    def test_reports_7_days(self, admin):
+        r = admin.get(f"{API}/admin/reports", params={"days": 7})
+        assert r.status_code == 200
+        assert r.json()["days"] == 7
+
+    def test_reports_90_days(self, admin):
+        r = admin.get(f"{API}/admin/reports", params={"days": 90})
+        assert r.status_code == 200
+        assert r.json()["days"] == 90
+
+    def test_reports_consistency_after_full_cycle(self, admin, user):
+        # snapshot
+        before = admin.get(f"{API}/admin/reports", params={"days": 30}).json()
+        # fresh booking cycle
+        items = user.get(f"{API}/items").json()
+        item = [i for i in items if i["status"] == "AVAILABLE"][0]
+        start = datetime.now(timezone.utc) + timedelta(days=20)
+        end = start + timedelta(hours=1)
+        r = user.post(f"{API}/bookings", json={
+            "item_ids": [item["id"]],
+            "start_time": _iso(start), "end_time": _iso(end),
+            "purpose": "TEST_report_cycle",
+        })
+        assert r.status_code == 200, r.text
+        bid = r.json()["id"]
+        assert admin.post(f"{API}/admin/bookings/{bid}/approve").status_code == 200
+        assert user.post(f"{API}/bookings/{bid}/return", json={"condition": "BAIK", "notes": "TEST"}).status_code == 200
+        assert admin.post(f"{API}/admin/bookings/{bid}/confirm-return").status_code == 200
+
+        after = admin.get(f"{API}/admin/reports", params={"days": 30}).json()
+        assert after["totals"]["bookings"] >= before["totals"]["bookings"] + 1
+        assert after["totals"]["returned"] >= before["totals"]["returned"] + 1
+        # user should appear in top_users
+        user_names = [u["name"] for u in after["top_users"]]
+        assert any(user_names), "top_users should not be empty"
+        # item should appear in top_items
+        item_names = [i["name"] for i in after["top_items"]]
+        assert item["name"] in item_names
+
+    def test_reports_export_csv(self, admin):
+        r = admin.get(f"{API}/admin/reports/export", params={"days": 30})
+        assert r.status_code == 200
+        assert "text/csv" in r.headers.get("content-type", "")
+        cd = r.headers.get("content-disposition", "")
+        assert "attachment" in cd.lower()
+        assert "laporan-30hari.csv" in cd
+        first_line = r.text.split("\n")[0]
+        for header in ["Booking", "Peminjam", "Barang", "Mulai", "Selesai", "Status", "Dikembalikan", "Terlambat"]:
+            assert header in first_line, f"Missing CSV header {header}"
+
+
+# ---------- profile whatsapp (iteration 2)
+class TestProfileWhatsapp:
+    def test_update_whatsapp_number_persists(self, user):
+        new_num = "+628123456789"
+        r = user.put(f"{API}/me/profile", json={"whatsapp_number": new_num})
+        assert r.status_code == 200, r.text
+        r2 = user.get(f"{API}/auth/me")
+        assert r2.status_code == 200
+        assert r2.json().get("whatsapp_number") == new_num
+
+    def test_whatsapp_notification_recorded(self, user, admin):
+        # ensure whatsapp_number set
+        user.put(f"{API}/me/profile", json={"whatsapp_number": "+628123456789"})
+        # trigger event: create booking -> admin notif WA recorded (admin_number empty ok, but user WA also sent on approve)
+        items = user.get(f"{API}/items").json()
+        item = [i for i in items if i["status"] == "AVAILABLE"][0]
+        start = datetime.now(timezone.utc) + timedelta(days=25)
+        r = user.post(f"{API}/bookings", json={
+            "item_ids": [item["id"]],
+            "start_time": _iso(start), "end_time": _iso(start + timedelta(hours=1)),
+            "purpose": "TEST_wa_notif",
+        })
+        assert r.status_code == 200
+        bid = r.json()["id"]
+        admin.post(f"{API}/admin/bookings/{bid}/approve")
+        # verify WA notif recorded in admin log
+        logs = admin.get(f"{API}/admin/notifications-log").json()
+        wa_logs = [l for l in logs if l.get("channel") == "WHATSAPP"]
+        assert len(wa_logs) > 0, "expected at least one WHATSAPP notification recorded"
+        # simulated flag should be True since creds are empty
+        assert any(l.get("simulated") is True for l in wa_logs)
+
+
+# ---------- telegram /laporan (iteration 2)
+class TestTelegramLaporan:
+    def test_laporan_command(self):
+        r = requests.post(f"{API}/telegram/webhook",
+                          json={"update_id": 99, "message": {"chat": {"id": -1003912804350}, "text": "/laporan"}},
+                          headers={"X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET})
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+

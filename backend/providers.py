@@ -181,13 +181,16 @@ class TelegramProvider:
 
 # ----------------------------------------------------------------------- whatsapp
 class WhatsAppProvider:
+    """Meta WhatsApp Cloud API. Groups are not supported by Meta — individual numbers only."""
+
     def __init__(self):
-        self.url = env("WHATSAPP_API_URL")
-        self.token = env("WHATSAPP_API_TOKEN")
+        self.phone_number_id = env("WHATSAPP_PHONE_NUMBER_ID")
+        self.token = env("WHATSAPP_ACCESS_TOKEN")
+        self.version = env("META_GRAPH_VERSION", "v23.0")
         self.admin_number = env("WHATSAPP_ADMIN_NUMBER")
 
     def configured(self) -> bool:
-        return bool(self.url and self.token)
+        return bool(self.phone_number_id and self.token)
 
     def send(self, to: str, text: str) -> ProviderResult:
         if not self.configured() or not to:
@@ -195,14 +198,21 @@ class WhatsAppProvider:
             return ProviderResult(True, {"simulated": True}, simulated=True)
         try:
             r = requests.post(
-                self.url,
+                f"https://graph.facebook.com/{self.version}/{self.phone_number_id}/messages",
                 headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
-                json={"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}},
+                json={
+                    "messaging_product": "whatsapp",
+                    "recipient_type": "individual",
+                    "to": str(to).lstrip("+"),
+                    "type": "text",
+                    "text": {"body": text, "preview_url": False},
+                },
                 timeout=TIMEOUT,
             )
+            data = r.json() if r.content else {}
             if r.status_code >= 300:
-                return ProviderResult(False, error=f"HTTP {r.status_code}: {r.text[:200]}")
-            return ProviderResult(True, {"response": r.json() if r.content else {}})
+                return ProviderResult(False, error=str(data.get("error", {}).get("message", r.text))[:300])
+            return ProviderResult(True, {"message_id": data.get("messages", [{}])[0].get("id")})
         except Exception as e:
             return ProviderResult(False, error=str(e))
 

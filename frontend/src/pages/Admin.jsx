@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
@@ -30,6 +31,8 @@ export default function Admin() {
   const [auditLogs, setAuditLogs] = useState([]);
   const [notifLogs, setNotifLogs] = useState([]);
   const [settings, setSettings] = useState({ buffer_before_minutes: 10, buffer_after_minutes: 15 });
+  const [report, setReport] = useState(null);
+  const [reportDays, setReportDays] = useState(30);
   const [busy, setBusy] = useState(false);
   const [newItem, setNewItem] = useState({ name: "", category: "", item_code: "", photo: "", condition: "BAIK", location: "Gudang Utama" });
 
@@ -46,6 +49,43 @@ export default function Admin() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    api.get("/admin/reports", { params: { days: reportDays } })
+      .then(({ data }) => setReport(data))
+      .catch((e) => toast.error(errMsg(e)));
+  }, [reportDays]);
+
+  const exportCsv = async () => {
+    const { data } = await api.get("/admin/reports/export", { params: { days: reportDays }, responseType: "blob" });
+    const url = URL.createObjectURL(new Blob([data], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = `laporan-${reportDays}hari.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportPdf = async () => {
+    const { default: jsPDF } = await import("jspdf");
+    const doc = new jsPDF();
+    let y = 20;
+    const line = (t, size = 11, bold = false) => {
+      doc.setFontSize(size); doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.text(t, 15, y); y += size < 13 ? 7 : 10;
+    };
+    line(`LAPORAN PEMINJAMAN ${reportDays} HARI`, 16, true);
+    line(`Total booking: ${report.totals.bookings} · Selesai: ${report.totals.returned} · Terlambat: ${report.totals.overdue}`);
+    y += 4;
+    line("BARANG PALING SERING DIPINJAM", 13, true);
+    report.top_items.forEach((i, n) => line(`${n + 1}. ${i.name} — ${i.count}x`));
+    y += 4;
+    line("PEMINJAM TERAKTIF", 13, true);
+    report.top_users.forEach((u, n) => line(`${n + 1}. ${u.name} — ${u.count}x`));
+    y += 4;
+    line("SERING TERLAMBAT", 13, true);
+    (report.late_users.length ? report.late_users : [{ name: "Tidak ada", count: 0 }])
+      .forEach((u, n) => line(`${n + 1}. ${u.name} — ${u.count}x`));
+    doc.save(`laporan-${reportDays}hari.pdf`);
+  };
 
   const act = async (fn, msg) => {
     setBusy(true);
@@ -74,7 +114,7 @@ export default function Admin() {
 
       <Tabs defaultValue="approval">
         <TabsList className="flex w-full flex-wrap justify-start gap-2 bg-transparent p-0">
-          {[["approval", "Approval"], ["peminjaman", "Peminjaman"], ["akses", "Akses"], ["inventaris", "Inventaris"], ["log", "Log"], ["pengaturan", "Pengaturan"]].map(([v, l]) => (
+          {[["approval", "Approval"], ["peminjaman", "Peminjaman"], ["akses", "Akses"], ["inventaris", "Inventaris"], ["laporan", "Laporan"], ["log", "Log"], ["pengaturan", "Pengaturan"]].map(([v, l]) => (
             <TabsTrigger key={v} value={v} data-testid={`tab-${v}`}
               className="rounded-full border border-white/10 px-5 py-2 text-sm data-[state=active]:bg-white/10 data-[state=active]:text-white">
               {l}
@@ -265,6 +305,93 @@ export default function Admin() {
               </div>
             ))}
           </div>
+        </TabsContent>
+
+        <TabsContent value="laporan" className="mt-8 space-y-8">
+          <div className="flex flex-wrap items-center gap-3">
+            {[7, 30, 90].map((d) => (
+              <button key={d} data-testid={`report-range-${d}`} onClick={() => setReportDays(d)}
+                className={`rounded-full border px-5 py-2 text-sm transition-colors duration-200 ${reportDays === d ? "border-white/20 bg-white/10 text-white" : "border-white/10 text-zinc-400 hover:text-white"}`}>
+                {d} hari
+              </button>
+            ))}
+            <Button data-testid="export-csv-button" variant="outline" onClick={exportCsv}
+              className="ml-auto rounded-full border-white/10 bg-transparent text-zinc-200 hover:bg-white/10">
+              Export CSV
+            </Button>
+            <Button data-testid="export-pdf-button" onClick={exportPdf}
+              className="rounded-full bg-[#007AFF] font-semibold text-white hover:bg-[#0069DB]">
+              Export PDF
+            </Button>
+          </div>
+
+          {report && (
+            <>
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                <StatCard label="Total Booking" value={report.totals.bookings} testId="report-total-bookings" />
+                <StatCard label="Selesai" value={report.totals.returned} testId="report-returned" accent="text-emerald-400" />
+                <StatCard label="Terlambat" value={report.totals.overdue} testId="report-overdue" accent="text-rose-400" />
+                <StatCard label="Total Barang" value={report.totals.items} testId="report-items" />
+              </div>
+
+              <div data-testid="report-trend-chart" className="rounded-2xl border border-white/10 bg-zinc-900 p-6">
+                <h3 className="text-xs uppercase tracking-[0.2em] text-zinc-500">Tren Peminjaman</h3>
+                <div className="mt-6 h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={report.trend}>
+                      <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+                      <XAxis dataKey="date" stroke="#71717a" fontSize={11} />
+                      <YAxis stroke="#71717a" fontSize={11} allowDecimals={false} />
+                      <Tooltip contentStyle={{ background: "#18181b", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12 }} />
+                      <Line type="monotone" dataKey="count" stroke="#007AFF" strokeWidth={2} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-2">
+                <div data-testid="report-top-items" className="rounded-2xl border border-white/10 bg-zinc-900 p-6">
+                  <h3 className="text-xs uppercase tracking-[0.2em] text-zinc-500">Barang Paling Sering Dipinjam</h3>
+                  <div className="mt-6 h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={report.top_items.slice(0, 6)} layout="vertical">
+                        <CartesianGrid stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                        <XAxis type="number" stroke="#71717a" fontSize={11} allowDecimals={false} />
+                        <YAxis type="category" dataKey="name" stroke="#71717a" fontSize={10} width={130} />
+                        <Tooltip contentStyle={{ background: "#18181b", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12 }} />
+                        <Bar dataKey="count" fill="#10B981" radius={[0, 6, 6, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <div data-testid="report-top-users" className="rounded-2xl border border-white/10 bg-zinc-900 p-6">
+                    <h3 className="text-xs uppercase tracking-[0.2em] text-zinc-500">Peminjam Teraktif</h3>
+                    <div className="mt-4 space-y-2">
+                      {report.top_users.map((u) => (
+                        <div key={u.name} className="flex justify-between rounded-xl bg-zinc-950/60 px-4 py-3 text-sm">
+                          <span>{u.name}</span><span className="font-mono text-zinc-400">{u.count}x</span>
+                        </div>
+                      ))}
+                      {report.top_users.length === 0 && <p className="text-sm text-zinc-500">Belum ada data.</p>}
+                    </div>
+                  </div>
+                  <div data-testid="report-late-users" className="rounded-2xl border border-rose-500/20 bg-rose-500/5 p-6">
+                    <h3 className="text-xs uppercase tracking-[0.2em] text-rose-300">Sering Terlambat</h3>
+                    <div className="mt-4 space-y-2">
+                      {report.late_users.map((u) => (
+                        <div key={u.name} className="flex justify-between rounded-xl bg-zinc-950/40 px-4 py-3 text-sm">
+                          <span>{u.name}</span><span className="font-mono text-rose-300">{u.count}x</span>
+                        </div>
+                      ))}
+                      {report.late_users.length === 0 && <p className="text-sm text-zinc-500">Tidak ada keterlambatan.</p>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </TabsContent>
 
         <TabsContent value="log" className="mt-8 grid gap-8 lg:grid-cols-3">

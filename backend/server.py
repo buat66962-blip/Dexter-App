@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
@@ -70,6 +70,11 @@ class SettingsInput(BaseModel):
 
 class TelegramLinkInput(BaseModel):
     telegram_id: str
+
+
+class ProfileInput(BaseModel):
+    whatsapp_number: Optional[str] = None
+    phone: Optional[str] = None
 
 
 # ----------------------------------------------------------------------- items
@@ -397,6 +402,25 @@ async def link_telegram(payload: TelegramLinkInput, user=CurrentUser):
     return ser(await db.users.find_one({"_id": oid(user["id"])}))
 
 
+@api.put("/me/profile")
+async def update_profile(payload: ProfileInput, user=CurrentUser):
+    await db.users.update_one({"_id": oid(user["id"])}, {"$set": payload.model_dump()})
+    return ser(await db.users.find_one({"_id": oid(user["id"])}))
+
+
+@api.get("/admin/reports")
+async def reports(days: int = 30, admin=AdminUser):
+    return await svc.build_report(days)
+
+
+@api.get("/admin/reports/export")
+async def reports_export(days: int = 30, admin=AdminUser):
+    rows = await svc.report_csv_rows(days)
+    csv = "\n".join(",".join('"' + str(c).replace('"', "'") + '"' for c in r) for r in rows)
+    return Response(content=csv, media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename=laporan-{days}hari.csv"})
+
+
 # ------------------------------------------------------------ telegram webhook
 @api.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
@@ -471,7 +495,7 @@ async def telegram_webhook(request: Request):
             "🏢 <b>OFFICE INVENTORY</b>\n\n"
             f"🔴 Dipinjam: {counts['borrowed']}\n🟡 Booking: {counts['pending']}\n"
             f"🟢 Tersedia: {counts['available']}\n⚠️ Overdue: {counts['overdue']}\n🔐 Active Access: {counts['access']}\n\n"
-            "Perintah: /pending /overdue /akses /barang"
+            "Perintah: /pending /overdue /akses /barang /laporan"
         ))
     elif text.startswith("/pending"):
         lines = []
@@ -492,6 +516,17 @@ async def telegram_webhook(request: Request):
     elif text.startswith("/barang"):
         lines = [f"{i['name']} — {i['status']}" async for i in db.items.find().limit(20)]
         telegram.send(chat_id, "📦 BARANG\n" + "\n".join(lines))
+    elif text.startswith("/laporan"):
+        r = await svc.build_report(30)
+        top_items = "\n".join(f"{i['name']} — {i['count']}x" for i in r["top_items"][:5]) or "-"
+        top_users = "\n".join(f"{u['name']} — {u['count']}x" for u in r["top_users"][:5]) or "-"
+        late = "\n".join(f"{u['name']} — {u['count']}x telat" for u in r["late_users"][:5]) or "-"
+        telegram.send(chat_id, (
+            f"📊 <b>LAPORAN 30 HARI</b>\n\nTotal booking: {r['totals']['bookings']}\n"
+            f"Selesai: {r['totals']['returned']} · Overdue: {r['totals']['overdue']}\n\n"
+            f"<b>Barang terfavorit</b>\n{top_items}\n\n<b>Peminjam teraktif</b>\n{top_users}\n\n"
+            f"<b>Sering terlambat</b>\n{late}"
+        ))
     else:
         telegram.send(chat_id, "Perintah tidak dikenal. /home")
     return {"ok": True}
