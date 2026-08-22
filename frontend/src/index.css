@@ -1,0 +1,63 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Sora:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    margin: 0;
+    font-family: "IBM Plex Sans", ui-sans-serif, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: #09090b;
+    color: #fafafa;
+}
+
+.font-heading {
+    font-family: "Sora", "IBM Plex Sans", sans-serif;
+}
+
+.font-mono,
+code {
+    font-family: "JetBrains Mono", monospace;
+}
+
+@layer base {
+    :root {
+        --background: 240 10% 3.9%;
+        --foreground: 0 0% 98%;
+        --card: 240 6% 10%;
+        --card-foreground: 0 0% 98%;
+        --popover: 240 6% 10%;
+        --popover-foreground: 0 0% 98%;
+        --primary: 211 100% 50%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 240 4% 16%;
+        --secondary-foreground: 0 0% 98%;
+        --muted: 240 4% 16%;
+        --muted-foreground: 240 5% 65%;
+        --accent: 240 4% 16%;
+        --accent-foreground: 0 0% 98%;
+        --destructive: 350 89% 60%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 240 4% 18%;
+        --input: 240 4% 18%;
+        --ring: 211 100% 50%;
+        --radius: 0.75rem;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    body {
+        @apply bg-background text-foreground;
+    }
+}
+
+@layer base {
+    [data-debug-wrapper="true"] {
+        display: contents !important;
+    }
+}

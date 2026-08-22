@@ -1,0 +1,143 @@
+{
+  "project_context": {
+    "name": "Smart Office Inventory Rental & Warehouse System",
+    "theme": "dark",
+    "language": "id",
+    "design_direction": "Minimal, modern, clean, fast. Airbnb + Google Calendar feel. Search-first. Simplicity over features.",
+    "flow": "BOOK -> APPROVE -> ACCESS -> TAKE -> USE -> RETURN"
+  },
+  "typography": {
+    "fonts": {
+      "headings": "Cabinet Grotesk",
+      "body": "IBM Plex Sans",
+      "mono": "JetBrains Mono"
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tighter font-bold",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight font-semibold",
+      "h3": "text-xl sm:text-2xl tracking-tight font-medium",
+      "h4": "text-lg sm:text-xl font-medium",
+      "body": "text-base leading-relaxed text-zinc-300",
+      "small": "text-sm text-zinc-500",
+      "labels": "text-xs uppercase tracking-[0.2em] font-semibold text-zinc-400"
+    },
+    "instruction_to_main_agent": "Use Cabinet Grotesk for all headings. Never use Inter for headings. Ensure high contrast against the dark background. DO NOT center align text globally."
+  },
+  "colors": {
+    "background": "#09090B",
+    "foreground": "#FAFAFA",
+    "card": "#18181B",
+    "card_foreground": "#FAFAFA",
+    "primary": "#007AFF",
+    "primary_foreground": "#FFFFFF",
+    "border": "rgba(255, 255, 255, 0.1)",
+    "status": {
+      "AVAILABLE": {
+        "bg": "bg-emerald-500/10",
+        "text": "text-emerald-500",
+        "hex": "#10B981"
+      },
+      "BOOKED": {
+        "bg": "bg-amber-500/10",
+        "text": "text-amber-500",
+        "hex": "#F59E0B"
+      },
+      "BORROWED": {
+        "bg": "bg-blue-500/10",
+        "text": "text-blue-500",
+        "hex": "#3B82F6"
+      },
+      "MAINTENANCE": {
+        "bg": "bg-zinc-500/10",
+        "text": "text-zinc-400",
+        "hex": "#A1A1AA"
+      },
+      "OVERDUE": {
+        "bg": "bg-rose-500/10",
+        "text": "text-rose-500",
+        "hex": "#F43F5E"
+      }
+    },
+    "instruction_to_main_agent": "Use the exact status colors above for badges and indicators. Do not use generic Vercel/Stripe palettes. Never use pure transparent background on dropdowns or headers over content."
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous Spacing. Use 2-3x more spacing than typical designs. Mobile-first focus.",
+    "padding": "Use p-6 or p-8 for containers and cards.",
+    "grids": "High Density Grid for Dashboards (grid-cols-1 md:grid-cols-3 lg:grid-cols-4) with gap-4 or gap-6. Grid children MUST be direct children.",
+    "containers": "Bento layout for dashboard summary, high-density grids for item lists.",
+    "border_radius": "rounded-2xl for main cards, rounded-full for buttons."
+  },
+  "components": {
+    "buttons": "Large touch targets (min-h-12 or min-h-14). Pill-shaped (rounded-full). Primary buttons use brand color. High contrast hover states.",
+    "cards": "Subtle 1px border (border-white/10), flat background (bg-zinc-900), no deep shadow. On hover: -translate-y-1, border-white/20.",
+    "forms": "Minimal forms. Use Shadcn components heavily customized (Inputs, Select, Dialog). Never use native inputs.",
+    "status_badges": "Color-coded pills based on status. Add glowing effect for AVAILABLE items.",
+    "navigation": "Sticky bottom nav on mobile, top glassmorphism nav on desktop (backdrop-blur-xl bg-zinc-950/60)."
+  },
+  "visual_enhancers": {
+    "surfaces": "Use Glassmorphism for sticky headers/modals: backdrop-blur-xl bg-zinc-950/60 border-b border-white/10. NO fully transparent headers.",
+    "textures": "Apply a subtle noise/grain effect or CSS grid background to break the flat digital look.",
+    "motion": "Hover states on all interactive elements. Page transitions using Framer Motion."
+  },
+  "accessibility": {
+    "contrast": "APCA standard. Ensure 4.5:1 for normal text. Text shadow when placed over images.",
+    "focus": "focus:ring-2 focus:ring-primary focus:outline-none focus:ring-offset-2 focus:ring-offset-zinc-950",
+    "testing": "All interactive and key informational elements MUST include a data-testid attribute in kebab-case."
+  },
+  "media": {
+    "images": {
+      "laptop": {
+        "url": "https://images.pexels.com/photos/880989/pexels-photo-880989.jpeg",
+        "description": "Dimly lit modern office desk with laptop (MacBook)"
+      },
+      "projector": {
+        "url": "https://images.pexels.com/photos/8761334/pexels-photo-8761334.jpeg",
+        "description": "Business analysis presentation in contemporary conference room"
+      },
+      "camera": {
+        "url": "https://images.pexels.com/photos/5875978/pexels-photo-5875978.jpeg",
+        "description": "Professional DSLR camera set up on a tripod"
+      },
+      "office": {
+        "url": "https://images.pexels.com/photos/13722865/pexels-photo-13722865.jpeg",
+        "description": "Stylish modern office setup"
+      },
+      "warehouse": {
+        "url": "https://images.unsplash.com/photo-1702360174953-b9d72d5ddba2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2OTV8MHwxfHNlYXJjaHw0fHxtb2Rlcm4lMjBtaW5pbWFsJTIwb2ZmaWNlJTIwZGFya3xlbnwwfHx8fDE3ODczOTk3Nzl8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Dark room with laptop and monitor"
+      }
+    },
+    "instruction_to_main_agent": "Use these EXACT URLs for inventory items and background assets. DO NOT use generic placeholder text or dummy image URLs. Ensure images have a max height (max-h-[80vh]) on mobile and use bg-black/50 overlay if placing text over them."
+  },
+  "libraries_to_use": [
+    "lucide-react (icons)",
+    "framer-motion (animations)",
+    "sonner (toast notifications)",
+    "recharts (admin charts)",
+    "date-fns (date formatting)",
+    "html2canvas",
+    "jspdf"
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "DO NOT output generic 'AI slop' frontend design. Break patterns! Think Airbnb for smart warehouses.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Create depth through layered design elements with z-index hierarchy and glassmorphism (12-24px blur).",
+    "You MUST NOT apply universal transition (e.g., transition: all). Apply transitions to specific properties like transform and opacity.",
+    "You MUST NOT center align the app container (.App { text-align: center; }). This disrupts reading flow.",
+    "Always use modern button styles (pill-shaped or sharp) with interaction animations & context-relevant colors.",
+    "NEVER use AI assistant Emoji characters (\ud83e\udd16\ud83e\udde0\ud83d\udcad\ud83d\udca1\ud83d\udd2e\ud83c\udfaf) for icons.",
+    "Every interaction needs micro-animations: hover states, transitions, entrance animations. Static = dead.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "MANDATORY: Add 'data-testid' to every interactive or important element (e.g., data-testid='search-inventory-input').",
+    "MANDATORY: Indonesian language for all UI text (e.g., 'Cari Barang', 'Pinjam', 'Kembalikan').",
+    "DO NOT build HTML-based components for advanced interactions like dropdowns, calendars, or toasts. Use Shadcn components instead."
+  ],
+  "GENERAL_UI_UX_DESIGN_GUIDELINES": {
+    "principles": [
+      "Simplicity over features: Hide unnecessary details until needed.",
+      "Clear Status: Status badges (AVAILABLE, BOOKED, BORROWED, OVERDUE) must be instantly recognizable.",
+      "Search-first interface: The main landing page should feature a prominent search bar.",
+      "Mobile-first: Large touch targets, bottom sheets for forms, and sticky CTAs."
+    ]
+  }
+}
