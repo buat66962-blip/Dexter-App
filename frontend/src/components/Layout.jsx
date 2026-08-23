@@ -1,12 +1,13 @@
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { Bell, Boxes, LayoutDashboard, LogOut, Search, ShoppingBag, Ticket } from "lucide-react";
+import { Bell, Bookmark, Boxes, LayoutDashboard, LogOut, Search, ShoppingBag, Ticket } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useCart } from "@/context/CartContext";
 import { Button } from "@/components/ui/button";
 
 const navItems = (isAdmin) => [
   { to: "/", label: "Katalog", icon: Search, id: "nav-catalog" },
-  { to: "/peminjaman", label: "Pesanan", icon: Ticket, id: "nav-bookings" },
+  { to: "/paket", label: "Paket", icon: Bookmark, id: "nav-templates" },
+  { to: "/peminjaman", label: "Booking", icon: Ticket, id: "nav-bookings" },
   { to: "/notifikasi", label: "Notifikasi", icon: Bell, id: "nav-notifications" },
   ...(isAdmin ? [{ to: "/admin", label: "Admin", icon: LayoutDashboard, id: "nav-admin" }] : []),
 ];
@@ -32,6 +33,7 @@ export default function Layout({ children }) {
               <NavLink
                 key={i.to}
                 to={i.to}
+                end={i.to === "/"}
                 data-testid={i.id}
                 className={({ isActive }) =>
                   `rounded-full px-4 py-2 text-sm font-medium transition-colors duration-200 ${
@@ -81,6 +83,7 @@ export default function Layout({ children }) {
             <NavLink
               key={i.to}
               to={i.to}
+              end={i.to === "/"}
               data-testid={`${i.id}-mobile`}
               className={({ isActive }) =>
                 `flex flex-1 flex-col items-center gap-1 py-3 text-[11px] font-medium ${

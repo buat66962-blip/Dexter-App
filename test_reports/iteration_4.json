@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 4: rewrote backend_test.py for the new simplified booking schema (pickup_date+return_date, no duration_type/pickup_time), added coverage for the Telegram approve-from-group bug fix, editable multi-templates (PUT/permissions), and kept regressions (checklist unlock, live stock, admin RBAC, calendar LIVE, CSV export). Pytest = 25/25 PASS. Frontend spot-checked via public URL: catalog title 'Booking Alat', no date/duration picker on catalog, FAB 'Lanjut Booking · N pcs'; checkout has exactly 2 date inputs (checkout-date-input + checkout-return-date-input), 0 time inputs, 0 duration-type toggles; after both dates picked, cart-stock-<code> renders 'sisa N pcs'; submit-order-button POST /api/bookings 200 and navigates to /peminjaman/:id; invoice shows 'Tanggal Pengambilan' + 'Tanggal Pengembalian'; nav labels are 'Booking' and 'Paket'; /peminjaman title 'Booking Saya'; /paket loads Template Paket page. Primary Telegram bug fixed: from.id=random + chat.id=-1003912804350 with data=approve:<bid> now succeeds (booking transitions APPROVED/BORROWED); reject/return_ok/access variants work; random from.id + random chat.id still rejected (booking stays PENDING); webhook w/o secret -> 403; /home from non-admin chat -> handled (200 with rejection message). Google Calendar LIVE verified (simulated=false, calendar_id=yncrewcalendar@gmail.com). Admin CSV export ok.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Layout nav active state", "issue": "When on /paket the 'Booking' nav item appears highlighted in the header (see screenshot). Likely NavLink default matching / route ordering — 'Paket' should be active on /paket. Cosmetic only.", "selector": "[data-testid='nav-templates']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Booking detail (/peminjaman/:id)", "issues": ["Could not find literal text 'Batalkan Booking' on freshly created PENDING booking page — verify the button copy matches spec exactly."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/iter4_results.xml"],
+  "action_items": [
+    "(Nit) Confirm cancel-button copy is 'Batalkan Booking' on PENDING booking detail page.",
+    "(Nit) Fix Layout NavLink active-state so 'Paket' pill lights up on /paket (currently 'Booking' appears active)."
+  ],
+  "critical_code_review_comments": [
+    "server.py telegram_webhook: permission now allows either from.id OR message.chat.id in TELEGRAM_ADMIN_CHAT_IDS — good; consider also validating cq.message.chat.type=='supergroup' and/or logging the effective identity for audit.",
+    "BookingInput no longer accepts duration_type — but Pydantic model is not `extra='forbid'`, so old FE payloads with duration_type/duration_hours will be silently accepted and ignored. Consider `model_config = ConfigDict(extra='forbid')` for safety.",
+    "create_booking builds start/end using naive 08:00/17:00 WIB; there is no way for a user to book <8h same-day slot anymore. Confirm this is the intended UX (matches request).",
+    "PUT /api/templates keeps snapshotted lines.max from item.quantity at edit-time; if admin reduces stock later the cached max becomes stale (already flagged in iter3).",
+    "Layout.jsx NavLink for '/peminjaman' likely matches '/paket' due to route matching order — verify with `end` prop or check parent path."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (25/25)", "frontend": "100% key flows verified"},
+  "test_credentials": "Admin admin@kantor.id/admin123; User ghozy@kantor.id/ghozy123; TG secret wh_secret_inventory_2026; TG admin group -1003912804350",
+  "seed_data_creation": "Multiple TEST_-prefixed bookings created + cancelled/returned in-fixtures; a couple confirmed-return TEST bookings remain in history. No lingering templates (all deleted).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run tests with `REACT_APP_BACKEND_URL=<url> python -m pytest backend/tests/backend_test.py -o addopts='' -v` (avoid xdist). BookingInput is now {lines, pickup_date, return_date, purpose, location} only. Telegram webhook accepts callbacks when EITHER from.id OR message.chat.id is in TELEGRAM_ADMIN_CHAT_IDS. Templates support multi + PUT with owner/admin authorization. Google Calendar/Telegram still LIVE — always keep TEST_ prefix and confirm-return/cancel in teardown.",
+  "rca of the issue": "Telegram approve bug RCA: previous impl only checked from.id against TELEGRAM_ADMIN_CHAT_IDS, but Telegram Groups callbacks carry the human user's personal id in from.id (not the group id). Fix at server.py:648 evaluates `allowed = from_id in admin_ids OR chat_id in admin_ids`, i.e. trusts the admin group chat_id. Verified end-to-end: random from.id + admin group chat.id → booking APPROVED; random from.id + random chat.id → PENDING (rejected)."
+}

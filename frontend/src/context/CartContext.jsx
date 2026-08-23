@@ -2,7 +2,6 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 const CartContext = createContext(null);
 const KEY = "gudang_cart_v2";
-const WIN_KEY = "gudang_window_v1";
 
 const read = (key, fallback) => {
   try {
@@ -14,11 +13,8 @@ const read = (key, fallback) => {
 
 export function CartProvider({ children }) {
   const [lines, setLines] = useState(() => read(KEY, []));
-  const [window, setWindowState] = useState(() =>
-    read(WIN_KEY, { pickup_date: "", duration_type: "hours", duration_hours: 8, return_date: "" }));
 
   useEffect(() => { localStorage.setItem(KEY, JSON.stringify(lines)); }, [lines]);
-  useEffect(() => { localStorage.setItem(WIN_KEY, JSON.stringify(window)); }, [window]);
 
   const setQty = (item, qty) =>
     setLines((prev) => {
@@ -42,13 +38,12 @@ export function CartProvider({ children }) {
       return [...map.values()];
     });
 
-  const setWindow = (w) => setWindowState((prev) => ({ ...prev, ...w }));
   const qtyOf = (itemId) => lines.find((l) => l.item_id === itemId)?.qty || 0;
   const totalQty = useMemo(() => lines.reduce((s, l) => s + l.qty, 0), [lines]);
   const clear = () => setLines([]);
 
   return (
-    <CartContext.Provider value={{ lines, setQty, addLines, qtyOf, totalQty, clear, window, setWindow }}>
+    <CartContext.Provider value={{ lines, setQty, addLines, qtyOf, totalQty, clear }}>
       {children}
     </CartContext.Provider>
   );

@@ -43,6 +43,11 @@ ketersediaan dihitung per qty × rentang waktu (bukan blok seluruh item).
 - **Stok Live**: katalog minta tanggal + durasi, lalu menampilkan `sisa N / total pcs` per alat (GET /items?start_time&end_time).
 - **Form order**: tanggal pengambilan tanpa jam (start 08:00 WIB), durasi mode `hours` (1-12 jam, hari yang sama) atau `days` (pilih tanggal pengembalian, end 17:00 WIB). Checklist pengembalian terbuka pada tanggal pengembalian.
 
+## Perubahan v3 (2026-06)
+- Booking cukup **2 tanggal**: pengambilan (start 08:00 WIB) & pengembalian (end 17:00 WIB); tanggal dipilih di halaman **Konfirmasi Booking**, bukan di katalog. Istilah UI: "Booking" (bukan "Pesanan").
+- **Template paket editable**: PUT /api/templates/{id} (ubah nama, is_shared, qty, tambah/hapus alat), halaman `/paket` untuk kelola; tiap user bisa punya banyak paket; edit/hapus hanya owner atau admin.
+- **Fix bug Telegram**: callback grup membawa `from.id` user pribadi, bukan id grup. Izin sekarang: `from.id` ATAU `message.chat.id` ada di `TELEGRAM_ADMIN_CHAT_IDS`.
+
 ## Status integrasi
 - **Telegram: LIVE** — @DataEquipmentTrackerbot, grup admin "Alat" (`-1003912804350`), webhook + secret.
 - WhatsApp: **DIHAPUS** dari sistem (Meta Cloud API tidak mendukung grup WhatsApp).

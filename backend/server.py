@@ -52,9 +52,7 @@ class BookingLine(BaseModel):
 class BookingInput(BaseModel):
     lines: List[BookingLine]
     pickup_date: str
-    duration_type: str = "hours"  # "hours" (hari yang sama) | "days" (beda hari)
-    duration_hours: int = 8
-    return_date: Optional[str] = None
+    return_date: str
     purpose: str
     location: Optional[str] = ""
 
@@ -205,22 +203,13 @@ async def create_booking(payload: BookingInput, user=CurrentUser):
         start = svc.parse_dt(f"{payload.pickup_date}T08:00:00+07:00")
     except ValueError:
         raise HTTPException(400, "Tanggal pengambilan tidak valid")
-
-    if payload.duration_type == "days":
-        if not payload.return_date:
-            raise HTTPException(400, "Pilih tanggal pengembalian")
-        try:
-            end = svc.parse_dt(f"{payload.return_date}T17:00:00+07:00")
-        except ValueError:
-            raise HTTPException(400, "Tanggal pengembalian tidak valid")
-        if end <= start:
-            raise HTTPException(400, "Tanggal pengembalian harus setelah tanggal pengambilan")
-        duration_hours = int((end - start).total_seconds() // 3600)
-    else:
-        if payload.duration_hours < 1 or payload.duration_hours > 12:
-            raise HTTPException(400, "Durasi jam harus 1-12 jam untuk peminjaman hari yang sama")
-        duration_hours = payload.duration_hours
-        end = start + timedelta(hours=duration_hours)
+    try:
+        end = svc.parse_dt(f"{payload.return_date}T17:00:00+07:00")
+    except ValueError:
+        raise HTTPException(400, "Tanggal pengembalian tidak valid")
+    if end <= start:
+        raise HTTPException(400, "Tanggal pengembalian tidak boleh sebelum tanggal pengambilan")
+    duration_hours = int((end - start).total_seconds() // 3600)
 
     lines = []
     for line in payload.lines:
@@ -250,8 +239,8 @@ async def create_booking(payload: BookingInput, user=CurrentUser):
         "start_time": start,
         "end_time": end,
         "pickup_date": payload.pickup_date,
-        "return_date": payload.return_date or payload.pickup_date,
-        "duration_type": payload.duration_type,
+        "return_date": payload.return_date,
+        "duration_days": max(1, round(duration_hours / 24) or 1),
         "duration_hours": duration_hours,
         "purpose": payload.purpose,
         "location": payload.location or "",
@@ -271,17 +260,17 @@ async def create_booking(payload: BookingInput, user=CurrentUser):
     for l in lines:
         by_cat.setdefault(l["category"] or "Lainnya", []).append(f"• {l['name']} ({l['qty']} pcs)")
     item_text = "\n".join(f"<b>{c}</b>\n" + "\n".join(rows) for c, rows in by_cat.items())
-    durasi = f"{duration_hours} jam (hari yang sama)" if payload.duration_type == "hours" else f"{duration_hours // 24 or 1} hari"
+    durasi = "hari yang sama" if payload.pickup_date == payload.return_date else f"{doc['duration_days']} hari"
     await svc.notify_admin("BOOKING_CREATED", (
-        f"🔔 <b>ORDER PEMINJAMAN BARU</b>\n\n👤 {user['name']}\n"
-        f"📅 Ambil: {payload.pickup_date}\n↩️ Kembali: {doc['return_date']}\n⏱️ Durasi: {durasi}\n"
+        f"🔔 <b>BOOKING BARU</b>\n\n👤 {user['name']}\n"
+        f"📅 Ambil: {payload.pickup_date}\n↩️ Kembali: {payload.return_date} ({durasi})\n"
         f"🎬 Acara: {payload.purpose}\n📍 Lokasi: {payload.location or '-'}\n\n{item_text}"
     ), bid, buttons=[[
         {"text": "✅ APPROVE", "callback_data": f"approve:{bid}"},
         {"text": "❌ REJECT", "callback_data": f"reject:{bid}"},
     ]])
     await svc.notify_user(user, "BOOKING_CREATED",
-                          f"📝 Order #{doc['code']} dibuat ({sum(l['qty'] for l in lines)} pcs), menunggu persetujuan admin.", bid)
+                          f"📝 Booking #{doc['code']} dibuat ({sum(l['qty'] for l in lines)} pcs), menunggu persetujuan admin.", bid)
     return await svc.booking_detail(doc)
 
 
@@ -438,6 +427,37 @@ async def create_template(payload: TemplateInput, user=CurrentUser):
     doc["_id"] = res.inserted_id
     await audit("TEMPLATE_CREATED", user["id"], metadata={"name": doc["name"]})
     return ser(doc)
+
+
+@api.put("/templates/{template_id}")
+async def update_template(template_id: str, payload: TemplateInput, user=CurrentUser):
+    if not is_valid_oid(template_id):
+        raise HTTPException(404, "Template tidak ditemukan")
+    t = await db.templates.find_one({"_id": oid(template_id)})
+    if not t:
+        raise HTTPException(404, "Template tidak ditemukan")
+    if t["owner_id"] != user["id"] and user["role"] != "admin":
+        raise HTTPException(403, "Bukan template kamu")
+    if not payload.lines:
+        raise HTTPException(400, "Template harus punya minimal satu alat")
+    lines = []
+    for line in payload.lines:
+        if not is_valid_oid(line.item_id):
+            raise HTTPException(400, "Barang tidak valid")
+        item = await db.items.find_one({"_id": oid(line.item_id)})
+        if not item:
+            raise HTTPException(404, "Barang tidak ditemukan")
+        lines.append({
+            "item_id": line.item_id, "name": item["name"], "item_code": item.get("item_code"),
+            "category": item.get("category"), "qty": max(1, line.qty), "photo": item.get("photo"),
+            "max": int(item.get("quantity", 1)),
+        })
+    await db.templates.update_one({"_id": oid(template_id)}, {"$set": {
+        "name": payload.name.strip() or t["name"], "lines": lines,
+        "is_shared": payload.is_shared, "updated_at": now_utc(),
+    }})
+    await audit("TEMPLATE_UPDATED", user["id"], metadata={"template_id": template_id})
+    return ser(await db.templates.find_one({"_id": oid(template_id)}))
 
 
 @api.delete("/templates/{template_id}")
@@ -624,8 +644,10 @@ async def telegram_webhook(request: Request):
 
     cq = update.get("callback_query")
     if cq:
-        chat_id = str(cq["from"]["id"])
-        if admin_ids and chat_id not in admin_ids:
+        from_id = str(cq["from"]["id"])
+        chat_id = str(cq.get("message", {}).get("chat", {}).get("id", from_id))
+        allowed = (not admin_ids) or from_id in admin_ids or chat_id in admin_ids
+        if not allowed:
             telegram.answer_callback(cq["id"], "Kamu bukan admin terdaftar.")
             return {"ok": True}
         data = cq.get("data", "")
@@ -670,10 +692,11 @@ async def telegram_webhook(request: Request):
     message = update.get("message") or {}
     text = (message.get("text") or "").strip().lower()
     chat_id = str(message.get("chat", {}).get("id", ""))
+    from_id = str(message.get("from", {}).get("id", ""))
     if not chat_id:
         return {"ok": True}
-    if admin_ids and chat_id not in admin_ids:
-        telegram.send(chat_id, "🚫 Telegram ID kamu belum terdaftar sebagai admin.")
+    if admin_ids and chat_id not in admin_ids and from_id not in admin_ids:
+        telegram.send(chat_id, "🚫 Chat ini belum terdaftar sebagai admin.")
         return {"ok": True}
     counts = {
         "borrowed": await db.bookings.count_documents({"status": svc.STATUS_ACTIVE}),

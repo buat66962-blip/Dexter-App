@@ -20,7 +20,7 @@ export default function MyBookings() {
 
   return (
     <div className="space-y-8">
-      <h1 className="font-heading text-4xl font-bold tracking-tighter sm:text-5xl">Pesanan Saya</h1>
+      <h1 className="font-heading text-4xl font-bold tracking-tighter sm:text-5xl">Booking Saya</h1>
 
       {loading ? <p className="text-sm text-zinc-500">Memuat…</p> : (
         <div data-testid="my-bookings-list" className="space-y-4">
@@ -46,7 +46,7 @@ export default function MyBookings() {
               </div>
             </Link>
           ))}
-          {bookings.length === 0 && <p className="text-sm text-zinc-500">Belum ada pesanan.</p>}
+          {bookings.length === 0 && <p className="text-sm text-zinc-500">Belum ada booking.</p>}
         </div>
       )}
     </div>

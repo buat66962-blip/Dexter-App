@@ -64,7 +64,7 @@ export default function BookingDetail() {
     line(`Nama: ${b.user_name}`);
     line(`Tanggal Pengambilan: ${fmtDate(b.start_time)}`);
     line(`Tanggal Pengembalian: ${fmtDate(b.end_time)}`);
-    line(`Durasi: ${b.duration_type === "days" ? `${Math.max(1, Math.round((b.duration_hours || 24) / 24))} hari` : `${b.duration_hours} jam (hari yang sama)`}`);
+    line(`Durasi: ${b.pickup_date === b.return_date ? "Hari yang sama" : `${b.duration_days || Math.max(1, Math.round((b.duration_hours || 24) / 24))} hari`}`);
     line(`Acara: ${b.purpose}`);
     line(`Lokasi: ${b.location || "-"}`);
     y += 3;
@@ -93,7 +93,7 @@ export default function BookingDetail() {
     <div className="space-y-8">
       <button data-testid="back-button" onClick={() => navigate("/peminjaman")}
         className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white">
-        <ArrowLeft className="h-4 w-4" /> Pesanan Saya
+        <ArrowLeft className="h-4 w-4" /> Booking Saya
       </button>
 
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -141,7 +141,7 @@ export default function BookingDetail() {
                   <li>1. Datang ke pintu {b.access.door_name}.</li>
                   <li>2. Sentuh keypad smart lock sampai menyala.</li>
                   <li>3. Masukkan kode {b.access.code} lalu tekan tombol pagar (#).</li>
-                  <li>4. Pintu terbuka. Kode hanya aktif pada rentang waktu pesananmu.</li>
+                  <li>4. Pintu terbuka. Kode hanya aktif pada rentang waktu bookingmu.</li>
                 </ol>
               </DialogContent>
             </Dialog>
@@ -150,7 +150,7 @@ export default function BookingDetail() {
       ) : (
         <div className="rounded-2xl border border-white/10 bg-zinc-900 p-8">
           <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Akses Gudang</p>
-          <p className="mt-4 text-base text-zinc-400">Kode akses muncul di sini setelah order disetujui admin.</p>
+          <p className="mt-4 text-base text-zinc-400">Kode akses muncul di sini setelah booking disetujui admin.</p>
         </div>
       )}
 
@@ -172,9 +172,9 @@ export default function BookingDetail() {
           <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Tanggal Pengembalian</dt><dd className="mt-2">{fmtDate(b.end_time)}</dd></div>
           <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Durasi Peminjaman</dt>
             <dd className="mt-2">
-              {b.duration_type === "days"
-                ? `${Math.max(1, Math.round((b.duration_hours || 24) / 24))} hari`
-                : `${b.duration_hours || "-"} jam (hari yang sama)`}
+              {b.pickup_date && b.return_date && b.pickup_date === b.return_date
+                ? "Hari yang sama"
+                : `${b.duration_days || Math.max(1, Math.round((b.duration_hours || 24) / 24))} hari`}
             </dd>
           </div>
           <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Acara</dt><dd className="mt-2">{b.purpose}</dd></div>
@@ -208,11 +208,11 @@ export default function BookingDetail() {
         <div className="grid gap-6 lg:grid-cols-2">
           <PhotoHandover bookingId={id} phase="pickup" photos={b.pickup_photos}
             locked={["RETURNED"].includes(b.status)}
-            lockedText="Order sudah selesai, foto pengambilan dikunci."
+            lockedText="Booking sudah selesai, foto pengambilan dikunci."
             onSaved={setB} />
           <PhotoHandover bookingId={id} phase="return" photos={b.return_photos}
             locked={!b.checklist_unlocked || b.status === "RETURNED"}
-            lockedText={b.status === "RETURNED" ? "Order sudah selesai, foto pengembalian dikunci."
+            lockedText={b.status === "RETURNED" ? "Booking sudah selesai, foto pengembalian dikunci."
               : `Terbuka pada tanggal pengembalian (${fmtDate(b.end_time)}).`}
             onSaved={setB} />
         </div>
@@ -298,9 +298,9 @@ export default function BookingDetail() {
 
       {canCancel && (
         <Button data-testid="cancel-booking-button" variant="outline" disabled={busy}
-          onClick={() => act(() => api.post(`/bookings/${id}/cancel`), "Order dibatalkan")}
+          onClick={() => act(() => api.post(`/bookings/${id}/cancel`), "Booking dibatalkan")}
           className="h-14 rounded-full border-white/10 bg-transparent px-8 text-base text-zinc-300 hover:bg-white/10">
-          Batalkan Order
+          Batalkan Booking
         </Button>
       )}
     </div>
