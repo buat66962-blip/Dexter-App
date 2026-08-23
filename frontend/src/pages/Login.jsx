@@ -43,13 +43,13 @@ export default function Login() {
         </div>
         <div className="max-w-lg">
           <h1 className="font-heading text-4xl font-bold tracking-tighter sm:text-5xl lg:text-6xl">
-            Pinjam barang kantor semudah booking hotel.
+            Seamless gear management for your creative production.
           </h1>
           <p className="mt-6 text-base leading-relaxed text-zinc-400">
-            Booking → Admin approve → Kode pintu storage otomatis dikirim → Ambil barang → Kembalikan.
+            Select Equipment → Set Duration → Get Approved → Create Content → Return Safely.
           </p>
         </div>
-        <p className="text-xs uppercase tracking-[0.2em] text-zinc-600">Smart Warehouse Access</p>
+        <p className="text-xs uppercase tracking-[0.2em] text-zinc-600">DEXTER • GEAR &amp; MAINTENANCE TRACKER</p>
       </div>
 
       <div className="flex w-full items-center justify-center p-6 lg:w-[520px] lg:border-l lg:border-white/10">
