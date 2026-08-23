@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from core import audit, db, env, now_utc, oid, ser
-from providers import calendar, generate_code, get_door_provider, telegram, whatsapp
+from providers import calendar, generate_code, get_door_provider, telegram
 
 logger = logging.getLogger("services")
 
@@ -82,28 +82,17 @@ async def notify_user(user: dict, ntype: str, text: str, booking_id: Optional[st
     if user.get("telegram_id"):
         res = telegram.send(str(user["telegram_id"]), text)
         await _record_notification("TELEGRAM", ntype, text, user_id, booking_id, res)
-    if user.get("whatsapp_number"):
-        res = whatsapp.send(str(user["whatsapp_number"]), text)
-        await _record_notification("WHATSAPP", ntype, text, user_id, booking_id, res)
 
 
-async def notify_admin(ntype: str, text: str, booking_id: Optional[str] = None, buttons: Optional[list] = None, whatsapp_text: Optional[str] = None):
+async def notify_admin(ntype: str, text: str, booking_id: Optional[str] = None, buttons: Optional[list] = None):
     res = telegram.broadcast_admins(text, buttons)
     await _record_notification("TELEGRAM", ntype, text, None, booking_id, res)
-    wa = whatsapp_text or text.replace("<b>", "").replace("</b>", "")
-    res2 = whatsapp.send_admin(wa)
-    await _record_notification("WHATSAPP", ntype, wa, None, booking_id, res2)
 
 
 async def retry_failed_notifications():
-    cursor = db.notifications.find({"status": "FAILED", "retry_count": {"$lt": 3}}).limit(20)
+    cursor = db.notifications.find({"status": "FAILED", "retry_count": {"$lt": 3}, "channel": "TELEGRAM"}).limit(20)
     async for n in cursor:
-        if n["channel"] == "TELEGRAM":
-            res = telegram.broadcast_admins(n["text"]) if not n.get("user_id") else telegram.send(str(n.get("target", "")), n["text"])
-        elif n["channel"] == "WHATSAPP":
-            res = whatsapp.send_admin(n["text"])
-        else:
-            continue
+        res = telegram.broadcast_admins(n["text"])
         await db.notifications.update_one(
             {"_id": n["_id"]},
             {"$set": {"status": "SENT" if res.ok else "FAILED", "error_message": res.error}, "$inc": {"retry_count": 1}},
@@ -126,14 +115,79 @@ async def items_conflicting(item_ids: List[str], start: datetime, end: datetime,
     return list(set(conflicts))
 
 
+async def booked_qty(item_id: str, start: datetime, end: datetime, exclude_booking: Optional[str] = None) -> int:
+    """Jumlah unit barang yang sudah dipesan pada rentang waktu tertentu."""
+    query = {
+        "status": {"$in": BLOCKING_STATUSES},
+        "item_ids": item_id,
+        "start_time": {"$lt": end},
+        "end_time": {"$gt": start},
+    }
+    if exclude_booking:
+        query["_id"] = {"$ne": oid(exclude_booking)}
+    total = 0
+    async for b in db.bookings.find(query):
+        for line in b.get("lines", []):
+            if line["item_id"] == item_id:
+                total += int(line.get("qty", 1))
+    return total
+
+
+async def available_qty(item: dict, start: datetime, end: datetime, exclude_booking: Optional[str] = None) -> int:
+    if item.get("status") == "MAINTENANCE":
+        return 0
+    return max(0, int(item.get("quantity", 1)) - await booked_qty(str(item["_id"]), start, end, exclude_booking))
+
+
+def return_day_reached(booking: dict) -> bool:
+    """Checklist hanya bisa dicentang pada hari pengembalian (WIB) atau setelahnya."""
+    wib = timezone(timedelta(hours=7))
+    return now_utc().astimezone(wib).date() >= parse_dt(booking["end_time"]).astimezone(wib).date()
+
+
+def build_checklist(lines: List[dict]) -> List[dict]:
+    return [{"item_id": l["item_id"], "name": l["name"], "item_code": l.get("item_code"),
+             "category": l.get("category"), "qty": l.get("qty", 1), "checked": False,
+             "checked_at": None} for l in lines]
+
+
+async def toggle_checklist(booking: dict, item_id: str, checked: bool) -> dict:
+    if booking["status"] not in (STATUS_APPROVED, STATUS_ACTIVE, STATUS_OVERDUE):
+        raise ValueError("Checklist hanya untuk peminjaman yang sedang berjalan")
+    if not return_day_reached(booking):
+        raise ValueError("Checklist baru bisa dicentang pada hari pengembalian")
+    checklist = booking.get("checklist") or build_checklist(booking.get("lines", []))
+    found = False
+    for row in checklist:
+        if row["item_id"] == item_id:
+            row["checked"] = checked
+            row["checked_at"] = now_utc() if checked else None
+            found = True
+    if not found:
+        raise ValueError("Barang tidak ada di pesanan ini")
+    await db.bookings.update_one({"_id": booking["_id"]}, {"$set": {"checklist": checklist}})
+    await audit("CHECKLIST_UPDATED", booking["user_id"], str(booking["_id"]), {"item_id": item_id, "checked": checked})
+    booking = await db.bookings.find_one({"_id": booking["_id"]})
+    return await booking_detail(booking)
+
+
 async def booking_detail(booking: dict) -> dict:
     data = ser(booking)
-    items = []
-    for item_id in booking.get("item_ids", []):
-        item = await db.items.find_one({"_id": oid(item_id)})
+    lines, items = [], []
+    for line in booking.get("lines", []):
+        item = await db.items.find_one({"_id": oid(line["item_id"])})
+        enriched = {**line, "photo": item.get("photo") if item else None,
+                    "condition": item.get("condition") if item else None,
+                    "location": item.get("location") if item else None}
+        lines.append(enriched)
         if item:
             items.append(ser(item))
+    data["lines"] = lines
     data["items"] = items
+    data["total_qty"] = sum(int(l.get("qty", 1)) for l in lines)
+    data["checklist"] = booking.get("checklist") or build_checklist(booking.get("lines", []))
+    data["checklist_unlocked"] = return_day_reached(booking)
+    data["checklist_complete"] = bool(data["checklist"]) and all(r.get("checked") for r in data["checklist"])
     cred = await db.access_credentials.find_one({"booking_id": str(booking["_id"]), "status": {"$ne": "REVOKED"}}, sort=[("_id", -1)])
     if cred:
         door = await db.doors.find_one({"_id": oid(cred["door_id"])})
@@ -209,11 +263,15 @@ async def revoke_access(booking_id: str):
 
 
 async def sync_calendar(booking: dict, items: List[dict]) -> dict:
-    item_names = "\n".join(i["name"] for i in items)
-    summary = f"[BORROW] {items[0]['name'] if items else 'Barang'} — {booking.get('user_name')}"
+    lines = booking.get("lines", [])
+    item_names = "\n".join(f"{l['name']} ({l.get('qty', 1)} pcs)" for l in lines)
+    first = lines[0]["name"] if lines else "Barang"
+    extra = f" +{len(lines) - 1} item" if len(lines) > 1 else ""
+    summary = f"[PINJAM] {first}{extra} — {booking.get('user_name')}"
     description = (
-        f"Peminjam:\n{booking.get('user_name')}\n\nBarang:\n{item_names}\n\n"
-        f"Booking ID:\n#{booking.get('code')}\n\nGudang:\nGudang Utama\n\nStatus:\nApproved"
+        f"Peminjam:\n{booking.get('user_name')}\n\nAcara:\n{booking.get('purpose')}\n\n"
+        f"Lokasi:\n{booking.get('location') or '-'}\n\nAlat:\n{item_names}\n\n"
+        f"Order ID:\n#{booking.get('code')}\n\nGudang:\nGudang Utama\n\nStatus:\nApproved"
     )
     result = calendar.create_event(summary, description, parse_dt(booking["start_time"]), parse_dt(booking["end_time"]))
     doc = {
@@ -234,19 +292,22 @@ async def sync_calendar(booking: dict, items: List[dict]) -> dict:
 
 async def approve_booking(booking: dict, admin_name: str) -> dict:
     if booking["status"] != STATUS_PENDING:
-        raise ValueError("Booking sudah diproses")
+        raise ValueError("Order sudah diproses")
     bid = str(booking["_id"])
-    conflicts = await items_conflicting(booking["item_ids"], parse_dt(booking["start_time"]), parse_dt(booking["end_time"]), exclude_booking=bid)
-    if conflicts:
-        raise ValueError("Barang sudah dipakai booking lain pada waktu tersebut")
+    start, end = parse_dt(booking["start_time"]), parse_dt(booking["end_time"])
+    for line in booking.get("lines", []):
+        item = await db.items.find_one({"_id": oid(line["item_id"])})
+        if not item:
+            raise ValueError(f"{line['name']} tidak ditemukan")
+        if await available_qty(item, start, end, exclude_booking=bid) < int(line.get("qty", 1)):
+            raise ValueError(f"Stok {line['name']} tidak cukup pada waktu tersebut")
     await db.bookings.update_one({"_id": booking["_id"]}, {"$set": {
         "status": STATUS_APPROVED, "approved_by": admin_name, "approved_at": now_utc(),
     }})
     booking = await db.bookings.find_one({"_id": booking["_id"]})
-    await _set_items_status(booking["item_ids"], "BOOKED")
-    items = [ser(i) async for i in db.items.find({"_id": {"$in": [oid(i) for i in booking["item_ids"]]}})]
-    await sync_calendar(booking, items)
+    await sync_calendar(booking, [])
     cred = await generate_access(booking)
+    await db.bookings.update_one({"_id": booking["_id"]}, {"$set": {"checklist": build_checklist(booking.get("lines", []))}})
     user = await db.users.find_one({"_id": oid(booking["user_id"])})
     await audit("BOOKING_APPROVED", booking["user_id"], bid, {"admin": admin_name})
     if user:
@@ -286,7 +347,6 @@ async def cancel_booking(booking: dict, actor: str) -> dict:
         calendar.delete_event(evt["google_event_id"])
         await db.calendar_events.update_one({"booking_id": bid}, {"$set": {"status": "CANCELLED"}})
     await db.bookings.update_one({"_id": booking["_id"]}, {"$set": {"status": STATUS_CANCELLED, "cancelled_at": now_utc()}})
-    await _set_items_status(booking["item_ids"], "AVAILABLE")
     await audit("BOOKING_CANCELLED", booking["user_id"], bid, {"actor": actor})
     user = await db.users.find_one({"_id": oid(booking["user_id"])})
     if user:
@@ -301,9 +361,10 @@ async def extend_booking(booking: dict, minutes: int, actor: str) -> dict:
         raise ValueError("Booking tidak bisa di-extend")
     bid = str(booking["_id"])
     new_end = parse_dt(booking["end_time"]) + timedelta(minutes=minutes)
-    conflicts = await items_conflicting(booking["item_ids"], parse_dt(booking["end_time"]), new_end, exclude_booking=bid)
-    if conflicts:
-        raise ValueError("Waktu tambahan bentrok dengan booking lain")
+    for line in booking.get("lines", []):
+        item = await db.items.find_one({"_id": oid(line["item_id"])})
+        if item and await available_qty(item, parse_dt(booking["end_time"]), new_end, exclude_booking=bid) < int(line.get("qty", 1)):
+            raise ValueError(f"Waktu tambahan bentrok: stok {line['name']} tidak cukup")
     await db.bookings.update_one({"_id": booking["_id"]}, {"$set": {
         "end_time": new_end, "status": STATUS_ACTIVE if booking["status"] == STATUS_OVERDUE else booking["status"],
     }})
@@ -324,7 +385,12 @@ async def extend_booking(booking: dict, minutes: int, actor: str) -> dict:
 
 async def request_return(booking: dict, condition: str, notes: str, photo: Optional[str]) -> dict:
     if booking["status"] not in (STATUS_APPROVED, STATUS_ACTIVE, STATUS_OVERDUE):
-        raise ValueError("Booking tidak dalam status peminjaman")
+        raise ValueError("Order tidak dalam status peminjaman")
+    if not return_day_reached(booking):
+        raise ValueError("Pengembalian baru bisa diajukan pada hari pengembalian")
+    checklist = booking.get("checklist") or build_checklist(booking.get("lines", []))
+    if not all(r.get("checked") for r in checklist):
+        raise ValueError("Centang semua alat di checklist pengembalian dulu")
     bid = str(booking["_id"])
     await db.bookings.update_one({"_id": booking["_id"]}, {"$set": {
         "status": STATUS_RETURN_REQUESTED,
@@ -352,9 +418,8 @@ async def confirm_return(booking: dict, admin_name: str, damaged: bool = False) 
     await db.bookings.update_one({"_id": booking["_id"]}, {"$set": {
         "status": STATUS_RETURNED, "returned_at": now_utc(), "returned_confirmed_by": admin_name,
     }})
-    new_status = "MAINTENANCE" if damaged else "AVAILABLE"
-    await _set_items_status(booking["item_ids"], new_status)
     if damaged:
+        await _set_items_status(booking["item_ids"], "MAINTENANCE")
         await db.items.update_many({"_id": {"$in": [oid(i) for i in booking["item_ids"]]}}, {"$set": {"condition": "RUSAK"}})
     await db.calendar_events.update_one({"booking_id": bid}, {"$set": {"status": "COMPLETED"}})
     await audit("ITEM_DAMAGED" if damaged else "ITEM_RETURNED", booking["user_id"], bid, {"admin": admin_name})
@@ -379,9 +444,9 @@ async def build_report(days: int = 30) -> dict:
     item_counts, user_counts, late_counts, trend = {}, {}, {}, {}
     returned = overdue = 0
     for b in bookings:
-        for item_id in b.get("item_ids", []):
-            name = item_names.get(item_id, "?")
-            item_counts[name] = item_counts.get(name, 0) + 1
+        for line in b.get("lines", []):
+            name = line.get("name") or item_names.get(line.get("item_id"), "?")
+            item_counts[name] = item_counts.get(name, 0) + int(line.get("qty", 1))
         user_counts[b["user_name"]] = user_counts.get(b["user_name"], 0) + 1
         day = parse_dt(b["created_at"]).astimezone(timezone(timedelta(hours=7))).strftime("%Y-%m-%d")
         trend[day] = trend.get(day, 0) + 1
@@ -417,7 +482,7 @@ async def report_csv_rows(days: int = 30):
             b.get("returned_at") and parse_dt(b["returned_at"]) > parse_dt(b["end_time"]))) else "Tidak"
         rows.append([
             f"#{b['code']}", b["user_name"],
-            "; ".join(item_names.get(i, "?") for i in b.get("item_ids", [])),
+            "; ".join(f"{l.get('name')} x{l.get('qty', 1)}" for l in b.get("lines", [])),
             fmt(parse_dt(b["start_time"])), fmt(parse_dt(b["end_time"])), b["status"],
             fmt(parse_dt(b["returned_at"])) if b.get("returned_at") else "-", late,
         ])
@@ -430,15 +495,20 @@ async def run_scheduler_once():
     # activate started bookings
     async for b in db.bookings.find({"status": STATUS_APPROVED, "start_time": {"$lte": now}}):
         await db.bookings.update_one({"_id": b["_id"]}, {"$set": {"status": STATUS_ACTIVE}})
-        await _set_items_status(b["item_ids"], "BORROWED")
         await audit("ITEM_BORROWED", b["user_id"], str(b["_id"]))
-    # return reminder 30 min before
-    async for b in db.bookings.find({"status": {"$in": [STATUS_ACTIVE, STATUS_APPROVED]}, "reminder_sent": {"$ne": True},
-                                     "end_time": {"$lte": now + timedelta(minutes=30), "$gt": now}}):
-        user = await db.users.find_one({"_id": oid(b["user_id"])})
-        if user:
-            await notify_user(ser(user), "RETURN_DUE", f"⏰ Booking #{b['code']} harus dikembalikan pukul {fmt(parse_dt(b['end_time']))}.", str(b["_id"]))
-        await db.bookings.update_one({"_id": b["_id"]}, {"$set": {"reminder_sent": True}})
+    # reminder bertingkat: H-1 (24 jam) lalu 30 menit sebelum jam kembali
+    for flag, minutes, label in (("reminder_24h_sent", 1440, "besok"), ("reminder_30m_sent", 30, "30 menit lagi")):
+        async for b in db.bookings.find({
+            "status": {"$in": [STATUS_ACTIVE, STATUS_APPROVED]}, flag: {"$ne": True},
+            "end_time": {"$lte": now + timedelta(minutes=minutes), "$gt": now},
+        }):
+            user = await db.users.find_one({"_id": oid(b["user_id"])})
+            if user:
+                await notify_user(ser(user), "RETURN_DUE", (
+                    f"⏰ Pengingat ({label}): booking #{b['code']} harus dikembalikan "
+                    f"{fmt(parse_dt(b['end_time']))}."
+                ), str(b["_id"]))
+            await db.bookings.update_one({"_id": b["_id"]}, {"$set": {flag: True}})
     # overdue
     async for b in db.bookings.find({"status": {"$in": [STATUS_ACTIVE, STATUS_APPROVED]}, "end_time": {"$lt": now}}):
         await db.bookings.update_one({"_id": b["_id"]}, {"$set": {"status": STATUS_OVERDUE}})
@@ -456,4 +526,6 @@ async def run_scheduler_once():
         if booking and booking["status"] in (STATUS_OVERDUE, STATUS_ACTIVE, STATUS_RETURN_REQUESTED):
             continue
         await revoke_access(cred["booking_id"])
+    # self-heal: barang non-maintenance selalu AVAILABLE (ketersediaan dihitung per qty & waktu)
+    await db.items.update_many({"status": {"$in": ["BOOKED", "BORROWED"]}}, {"$set": {"status": "AVAILABLE"}})
     await retry_failed_notifications()

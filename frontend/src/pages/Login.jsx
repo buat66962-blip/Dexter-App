@@ -12,7 +12,7 @@ export default function Login() {
   const { login, register } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ name: "", email: "", password: "", whatsapp_number: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [loading, setLoading] = useState(false);
 
   const submit = async (e) => {
@@ -80,14 +80,6 @@ export default function Login() {
             <Input data-testid="login-password-input" type="password" value={form.password} onChange={set("password")} required
               className="h-12 rounded-xl border-white/10 bg-zinc-900 text-base" placeholder="••••••••" />
           </div>
-
-          {mode === "register" && (
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-[0.2em] text-zinc-400">No. WhatsApp (opsional)</Label>
-              <Input data-testid="register-whatsapp-input" value={form.whatsapp_number} onChange={set("whatsapp_number")}
-                className="h-12 rounded-xl border-white/10 bg-zinc-900 text-base" placeholder="628xxxxxxxxxx" />
-            </div>
-          )}
 
           <Button data-testid="auth-submit-button" type="submit" disabled={loading}
             className="h-12 w-full rounded-full bg-[#007AFF] text-base font-semibold text-white hover:bg-[#0069DB]">

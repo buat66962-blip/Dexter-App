@@ -2,21 +2,15 @@ import { useEffect, useState } from "react";
 import { Bell } from "lucide-react";
 import { toast } from "sonner";
 import { api, errMsg } from "@/api";
-import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
 const fmt = (iso) => new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 
 export default function Notifications() {
   const [list, setList] = useState([]);
-  const { user, reload } = useAuth();
-  const [wa, setWa] = useState("");
 
   const load = () => api.get("/notifications").then(({ data }) => setList(data)).catch((e) => toast.error(errMsg(e)));
   useEffect(() => { load(); }, []);
-  useEffect(() => { setWa(user?.whatsapp_number || ""); }, [user]);
 
   return (
     <div className="space-y-8">
@@ -27,28 +21,6 @@ export default function Notifications() {
           onClick={async () => { await api.post("/notifications/read-all"); load(); }}>
           Tandai dibaca
         </Button>
-      </div>
-
-      <div className="rounded-2xl border border-white/10 bg-zinc-900 p-6">
-        <Label className="text-xs uppercase tracking-[0.2em] text-zinc-400">Nomor WhatsApp untuk notifikasi</Label>
-        <div className="mt-3 flex flex-wrap gap-3">
-          <Input data-testid="whatsapp-number-input" value={wa} onChange={(e) => setWa(e.target.value)}
-            placeholder="628xxxxxxxxxx" className="h-12 max-w-xs rounded-xl border-white/10 bg-zinc-950" />
-          <Button data-testid="save-whatsapp-button"
-            onClick={async () => {
-              try {
-                await api.put("/me/profile", { whatsapp_number: wa });
-                await reload();
-                toast.success("Nomor WhatsApp disimpan");
-              } catch (e) { toast.error(errMsg(e)); }
-            }}
-            className="h-12 rounded-full bg-[#007AFF] px-6 font-semibold text-white hover:bg-[#0069DB]">
-            Simpan
-          </Button>
-        </div>
-        <p className="mt-3 text-sm text-zinc-500">
-          Kode akses gudang dan pengingat pengembalian akan dikirim ke nomor ini.
-        </p>
       </div>
 
       <div data-testid="notifications-list" className="space-y-3">

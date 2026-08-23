@@ -34,7 +34,7 @@ export default function Admin() {
   const [report, setReport] = useState(null);
   const [reportDays, setReportDays] = useState(30);
   const [busy, setBusy] = useState(false);
-  const [newItem, setNewItem] = useState({ name: "", category: "", item_code: "", photo: "", condition: "BAIK", location: "Gudang Utama" });
+  const [newItem, setNewItem] = useState({ name: "", category: "", item_code: "", photo: "", condition: "BAIK", location: "Gudang Utama", quantity: 1 });
 
   const load = useCallback(async () => {
     try {
@@ -132,7 +132,7 @@ export default function Admin() {
                     <div>
                       <p className="font-mono text-xs text-zinc-500">#{b.code}</p>
                       <h3 className="mt-1 font-heading text-xl font-medium">{b.user_name}</h3>
-                      <p className="mt-2 text-sm text-zinc-400">{b.items.map((i) => i.name).join(", ")}</p>
+                      <p className="mt-2 text-sm text-zinc-400">{b.lines.map((l) => `${l.name} (${l.qty})`).join(", ")}</p>
                       <p className="text-sm text-zinc-500">{fmt(b.start_time)} — {fmt(b.end_time)} · {b.purpose}</p>
                     </div>
                     <div className="flex gap-3">
@@ -163,7 +163,7 @@ export default function Admin() {
                     <div>
                       <p className="font-mono text-xs text-zinc-500">#{b.code}</p>
                       <h3 className="mt-1 font-heading text-xl font-medium">{b.user_name}</h3>
-                      <p className="mt-2 text-sm text-zinc-400">{b.items.map((i) => i.name).join(", ")}</p>
+                      <p className="mt-2 text-sm text-zinc-400">{b.lines.map((l) => `${l.name} (${l.qty})`).join(", ")}</p>
                       <p className="text-sm text-zinc-500">Kondisi: {b.return_condition} {b.return_notes}</p>
                     </div>
                     <div className="flex gap-3">
@@ -192,7 +192,7 @@ export default function Admin() {
                 <div key={b.id} data-testid={`overdue-${b.code}`} className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-rose-500/30 bg-rose-500/5 p-6">
                   <div>
                     <p className="font-mono text-xs text-zinc-500">#{b.code}</p>
-                    <h3 className="mt-1 font-heading text-lg">{b.user_name} — {b.items.map((i) => i.name).join(", ")}</h3>
+                    <h3 className="mt-1 font-heading text-lg">{b.user_name} — {b.lines.map((l) => `${l.name} (${l.qty})`).join(", ")}</h3>
                     <p className="text-sm text-rose-300">Seharusnya kembali {fmt(b.end_time)}</p>
                   </div>
                   <div className="flex gap-3">
@@ -221,7 +221,7 @@ export default function Admin() {
                 className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-zinc-900 p-5 transition-colors duration-200 hover:border-white/20">
                 <div>
                   <p className="font-mono text-xs text-zinc-500">#{b.code} · {b.user_name}</p>
-                  <p className="mt-1 text-sm">{b.items.map((i) => i.name).join(", ")}</p>
+                  <p className="mt-1 text-sm">{b.lines.map((l) => `${l.name} (${l.qty})`).join(", ")}</p>
                   <p className="text-xs text-zinc-500">{fmt(b.start_time)} — {fmt(b.end_time)}</p>
                 </div>
                 <StatusBadge status={b.status} />
@@ -267,11 +267,12 @@ export default function Admin() {
             <DialogContent className="border-white/10 bg-zinc-900 text-zinc-100">
               <DialogHeader><DialogTitle className="font-heading">Tambah Barang</DialogTitle></DialogHeader>
               <div className="space-y-4">
-                {[["name", "Nama"], ["category", "Kategori"], ["item_code", "Kode Barang"], ["photo", "URL Foto"]].map(([k, l]) => (
+                {[["name", "Nama"], ["category", "Kategori"], ["item_code", "Kode Barang"], ["quantity", "Jumlah Stok"], ["photo", "URL Foto"]].map(([k, l]) => (
                   <div key={k} className="space-y-2">
                     <Label className="text-xs uppercase tracking-[0.2em] text-zinc-400">{l}</Label>
                     <Input data-testid={`item-${k}-input`} value={newItem[k]}
-                      onChange={(e) => setNewItem({ ...newItem, [k]: e.target.value })}
+                      type={k === "quantity" ? "number" : "text"}
+                      onChange={(e) => setNewItem({ ...newItem, [k]: k === "quantity" ? Number(e.target.value) : e.target.value })}
                       className="h-12 rounded-xl border-white/10 bg-zinc-950" />
                   </div>
                 ))}
@@ -291,7 +292,7 @@ export default function Admin() {
                   <img src={i.photo} alt={i.name} className="h-14 w-14 rounded-xl object-cover" />
                   <div>
                     <p className="font-heading text-lg">{i.name}</p>
-                    <p className="font-mono text-xs text-zinc-500">{i.item_code} · {i.category}</p>
+                    <p className="font-mono text-xs text-zinc-500">{i.item_code} · {i.category} · {i.quantity} pcs</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">

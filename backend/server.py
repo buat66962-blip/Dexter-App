@@ -40,13 +40,26 @@ class ItemInput(BaseModel):
     location: str = "Gudang Utama"
     notes: Optional[str] = None
     status: str = "AVAILABLE"
+    quantity: int = 1
+
+
+class BookingLine(BaseModel):
+    item_id: str
+    qty: int = 1
 
 
 class BookingInput(BaseModel):
-    item_ids: List[str]
-    start_time: str
-    end_time: str
+    lines: List[BookingLine]
+    pickup_date: str
+    pickup_time: str = "09:00"
+    duration_hours: int = 8
     purpose: str
+    location: Optional[str] = ""
+
+
+class ChecklistInput(BaseModel):
+    item_id: str
+    checked: bool = True
 
 
 class ReturnInput(BaseModel):
@@ -73,7 +86,6 @@ class TelegramLinkInput(BaseModel):
 
 
 class ProfileInput(BaseModel):
-    whatsapp_number: Optional[str] = None
     phone: Optional[str] = None
 
 
@@ -85,13 +97,19 @@ async def list_items(q: str = "", category: str = "", start_time: str = "", end_
         query["$or"] = [{"name": {"$regex": q, "$options": "i"}}, {"item_code": {"$regex": q, "$options": "i"}}]
     if category:
         query["category"] = category
-    items = [ser(i) async for i in db.items.find(query).sort("name", 1)]
+    docs = [i async for i in db.items.find(query).sort([("category", 1), ("name", 1)])]
+    items = []
+    win = None
     if start_time and end_time:
-        conflicts = await svc.items_conflicting(
-            [i["id"] for i in items], svc.parse_dt(start_time), svc.parse_dt(end_time)
-        )
-        for i in items:
-            i["available_in_window"] = i["id"] not in conflicts and i["status"] != "MAINTENANCE"
+        win = (svc.parse_dt(start_time), svc.parse_dt(end_time))
+    for doc in docs:
+        data = ser(doc)
+        data["quantity"] = int(doc.get("quantity", 1))
+        if win:
+            data["available_qty"] = await svc.available_qty(doc, win[0], win[1])
+        else:
+            data["available_qty"] = 0 if doc.get("status") == "MAINTENANCE" else data["quantity"]
+        items.append(data)
     return items
 
 
@@ -103,12 +121,28 @@ async def get_item(item_id: str, user=CurrentUser):
     if not item:
         raise HTTPException(404, "Barang tidak ditemukan")
     data = ser(item)
+    data["quantity"] = int(item.get("quantity", 1))
     schedule = []
     async for b in db.bookings.find({"item_ids": item_id, "status": {"$in": svc.BLOCKING_STATUSES}}).sort("start_time", 1):
+        qty = sum(int(l.get("qty", 1)) for l in b.get("lines", []) if l["item_id"] == item_id)
         schedule.append({"booking_id": str(b["_id"]), "code": b["code"], "user_name": b["user_name"],
+                         "qty": qty,
                          "start_time": svc.parse_dt(b["start_time"]).isoformat(),
                          "end_time": svc.parse_dt(b["end_time"]).isoformat(), "status": b["status"]})
     data["schedule"] = schedule
+    history = []
+    async for b in db.bookings.find({
+        "item_ids": item_id, "status": {"$in": [svc.STATUS_RETURNED, svc.STATUS_CANCELLED, svc.STATUS_REJECTED]},
+    }).sort("created_at", -1).limit(15):
+        history.append({
+            "booking_id": str(b["_id"]), "code": b["code"], "user_name": b["user_name"],
+            "start_time": svc.parse_dt(b["start_time"]).isoformat(),
+            "end_time": svc.parse_dt(b["end_time"]).isoformat(),
+            "status": b["status"], "purpose": b.get("purpose"),
+            "returned_at": svc.parse_dt(b["returned_at"]).isoformat() if b.get("returned_at") else None,
+            "return_condition": b.get("return_condition"),
+        })
+    data["history"] = history
     return data
 
 
@@ -151,59 +185,70 @@ async def _next_code() -> str:
 
 @api.post("/bookings")
 async def create_booking(payload: BookingInput, user=CurrentUser):
-    if not payload.item_ids:
-        raise HTTPException(400, "Pilih minimal satu barang")
-    start, end = svc.parse_dt(payload.start_time), svc.parse_dt(payload.end_time)
-    if end <= start:
-        raise HTTPException(400, "Waktu selesai harus setelah waktu mulai")
-    for item_id in payload.item_ids:
-        if not is_valid_oid(item_id):
+    if not payload.lines:
+        raise HTTPException(400, "Keranjang masih kosong")
+    if payload.duration_hours < 1:
+        raise HTTPException(400, "Durasi peminjaman minimal 1 jam")
+    try:
+        start = svc.parse_dt(f"{payload.pickup_date}T{payload.pickup_time}:00+07:00")
+    except ValueError:
+        raise HTTPException(400, "Tanggal atau jam pengambilan tidak valid")
+    end = start + timedelta(hours=payload.duration_hours)
+
+    lines = []
+    for line in payload.lines:
+        if not is_valid_oid(line.item_id):
             raise HTTPException(400, "Barang tidak valid")
-        item = await db.items.find_one({"_id": oid(item_id)})
+        item = await db.items.find_one({"_id": oid(line.item_id)})
         if not item:
             raise HTTPException(404, "Barang tidak ditemukan")
-        if item["status"] == "MAINTENANCE":
+        if item.get("status") == "MAINTENANCE":
             raise HTTPException(400, f"{item['name']} sedang maintenance")
-    conflicts = await svc.items_conflicting(payload.item_ids, start, end)
-    if conflicts:
-        names = [ser(i)["name"] async for i in db.items.find({"_id": {"$in": [oid(c) for c in conflicts]}})]
-        raise HTTPException(400, f"Barang tidak tersedia pada waktu tersebut: {', '.join(names)}")
-    own = await db.bookings.find_one({
-        "user_id": user["id"], "status": {"$in": svc.BLOCKING_STATUSES},
-        "start_time": {"$lt": end}, "end_time": {"$gt": start},
-    })
-    if own:
-        raise HTTPException(400, "Kamu sudah punya booking aktif di waktu yang sama")
+        if line.qty < 1:
+            raise HTTPException(400, f"Jumlah {item['name']} minimal 1")
+        tersedia = await svc.available_qty(item, start, end)
+        if tersedia < line.qty:
+            raise HTTPException(400, f"{item['name']} hanya tersedia {tersedia} pcs pada waktu tersebut")
+        lines.append({
+            "item_id": line.item_id, "name": item["name"], "item_code": item.get("item_code"),
+            "category": item.get("category"), "qty": line.qty,
+        })
+
     doc = {
         "code": await _next_code(),
         "user_id": user["id"],
         "user_name": user["name"],
-        "item_ids": payload.item_ids,
+        "lines": lines,
+        "item_ids": [l["item_id"] for l in lines],
         "start_time": start,
         "end_time": end,
+        "duration_hours": payload.duration_hours,
         "purpose": payload.purpose,
+        "location": payload.location or "",
         "status": svc.STATUS_PENDING,
         "approved_by": None,
+        "checklist": [],
         "created_at": now_utc(),
     }
     res = await db.bookings.insert_one(doc)
     doc["_id"] = res.inserted_id
     bid = str(res.inserted_id)
-    items = [ser(i) async for i in db.items.find({"_id": {"$in": [oid(i) for i in payload.item_ids]}})]
-    await db.items.update_many({"_id": {"$in": [oid(i) for i in payload.item_ids]}}, {"$set": {"status": "BOOKED"}})
-    await audit("BOOKING_CREATED", user["id"], bid, {"items": [i["name"] for i in items]})
-    item_lines = "\n".join(f"📦 {i['name']} ({i['item_code']})" for i in items)
+    await audit("BOOKING_CREATED", user["id"], bid, {"items": [l["name"] for l in lines]})
+
+    by_cat = {}
+    for l in lines:
+        by_cat.setdefault(l["category"] or "Lainnya", []).append(f"• {l['name']} ({l['qty']} pcs)")
+    item_text = "\n".join(f"<b>{c}</b>\n" + "\n".join(rows) for c, rows in by_cat.items())
     await svc.notify_admin("BOOKING_CREATED", (
-        f"🔔 <b>BOOKING BARU</b>\n\n👤 {user['name']}\n{item_lines}\n"
-        f"⏰ {svc.fmt(start)} - {svc.fmt(end)}\n📝 {payload.purpose}"
+        f"🔔 <b>ORDER PEMINJAMAN BARU</b>\n\n👤 {user['name']}\n"
+        f"📅 Ambil: {svc.fmt(start)}\n⏱️ Durasi: {payload.duration_hours} jam (kembali {svc.fmt(end)})\n"
+        f"🎬 Acara: {payload.purpose}\n📍 Lokasi: {payload.location or '-'}\n\n{item_text}"
     ), bid, buttons=[[
         {"text": "✅ APPROVE", "callback_data": f"approve:{bid}"},
         {"text": "❌ REJECT", "callback_data": f"reject:{bid}"},
-    ]], whatsapp_text=(
-        f"🔔 PEMINJAMAN BARU\n\nPeminjam: {user['name']}\nBarang: {', '.join(i['name'] for i in items)}\n"
-        f"Waktu: {svc.fmt(start)} - {svc.fmt(end)}\nStatus: Menunggu approval\n\nCek detail di Telegram Admin."
-    ))
-    await svc.notify_user(user, "BOOKING_CREATED", f"📝 Booking #{doc['code']} dibuat, menunggu persetujuan admin.", bid)
+    ]])
+    await svc.notify_user(user, "BOOKING_CREATED",
+                          f"📝 Order #{doc['code']} dibuat ({sum(l['qty'] for l in lines)} pcs), menunggu persetujuan admin.", bid)
     return await svc.booking_detail(doc)
 
 
@@ -248,6 +293,15 @@ async def cancel(booking_id: str, user=CurrentUser):
     b = await _load_booking(booking_id, user)
     try:
         return await svc.cancel_booking(b, user["name"])
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@api.post("/bookings/{booking_id}/checklist")
+async def update_checklist(booking_id: str, payload: ChecklistInput, user=CurrentUser):
+    b = await _load_booking(booking_id, user)
+    try:
+        return await svc.toggle_checklist(b, payload.item_id, payload.checked)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -543,25 +597,46 @@ app.add_middleware(
 
 
 SEED_ITEMS = [
-    ("Sony A6400", "Kamera", "CAM-001", "https://images.pexels.com/photos/5875978/pexels-photo-5875978.jpeg"),
-    ("Battery Sony NP-FW50", "Aksesoris", "BAT-003", "https://images.pexels.com/photos/10668297/pexels-photo-10668297.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
-    ("Tripod Manfrotto", "Aksesoris", "TRI-002", "https://images.unsplash.com/photo-1612548403247-aa2873e9422d?crop=entropy&cs=srgb&fm=jpg&q=85"),
-    ("MacBook Pro 14", "Laptop", "LAP-001", "https://images.pexels.com/photos/880989/pexels-photo-880989.jpeg"),
-    ("Proyektor Epson EB-X51", "Proyektor", "PRJ-001", "https://images.pexels.com/photos/8761334/pexels-photo-8761334.jpeg"),
-    ("Rode Wireless Go II", "Audio", "AUD-002", "https://images.unsplash.com/photo-1702360174953-b9d72d5ddba2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2OTV8MHwxfHNlYXJjaHw0fHxtb2Rlcm4lMjBtaW5pbWFsJTIwb2ZmaWNlJTIwZGFya3xlbnwwfHx8fDE3ODczOTk3Nzl8MA&ixlib=rb-4.1.0&q=85"),
-    ("Lighting Godox SL60", "Lighting", "LGT-001", "https://images.pexels.com/photos/25526512/pexels-photo-25526512.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
-    ("iPad Pro 11", "Tablet", "TAB-001", "https://images.unsplash.com/photo-1600484269056-a17ecd3cfb1f?crop=entropy&cs=srgb&fm=jpg&q=85"),
+    ("Camera", "Sony A7IV YN", "CAM-A7IV", 6, "https://images.unsplash.com/photo-1612548403247-aa2873e9422d?crop=entropy&cs=srgb&fm=jpg&q=85"),
+    ("Camera", "Sony A7C YN", "CAM-A7C", 1, "https://images.pexels.com/photos/5875978/pexels-photo-5875978.jpeg"),
+    ("Battery", "Battery Dummy FZ100", "BAT-DUMMY", 6, "https://images.pexels.com/photos/10668297/pexels-photo-10668297.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
+    ("Battery", "Battery FZ100", "BAT-FZ100", 3, "https://images.pexels.com/photos/17566032/pexels-photo-17566032.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
+    ("Battery", "Dock Charger FZ100", "BAT-DOCK", 1, "https://images.pexels.com/photos/10668297/pexels-photo-10668297.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
+    ("Memory", "SDCard 128 GB", "MEM-128", 7, "https://images.unsplash.com/photo-1576834975354-ee694be1f0d1?crop=entropy&cs=srgb&fm=jpg&q=85"),
+    ("Memory", "SDCard 64 GB", "MEM-64", 2, "https://images.unsplash.com/photo-1576834975354-ee694be1f0d1?crop=entropy&cs=srgb&fm=jpg&q=85"),
+    ("Lens", "Sony 20mm F/1.8", "LEN-20", 1, "https://images.unsplash.com/photo-1624016687205-b1808c76ec55?crop=entropy&cs=srgb&fm=jpg&q=85"),
+    ("Lens", "Tamron 28-75mm F/2.8", "LEN-2875", 2, "https://images.unsplash.com/photo-1624016687205-b1808c76ec55?crop=entropy&cs=srgb&fm=jpg&q=85"),
+    ("Lens", "Tamron 70-180mm F/2.8", "LEN-70180", 1, "https://images.unsplash.com/photo-1624016687205-b1808c76ec55?crop=entropy&cs=srgb&fm=jpg&q=85"),
+    ("Multicam Set", "Mixer Switcher Roland YN", "MUL-ROLAND", 1, "https://images.pexels.com/photos/13699196/pexels-photo-13699196.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
+    ("Multicam Set", "HDMI Fiber Optic", "MUL-HDMIFO", 4, "https://images.pexels.com/photos/13699196/pexels-photo-13699196.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
+    ("Multicam Set", "HDMI Biasa", "MUL-HDMI", 2, "https://images.pexels.com/photos/13699196/pexels-photo-13699196.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
+    ("Audio/Mic", "Rode NTG 4+", "AUD-NTG4", 1, "https://images.pexels.com/photos/25526512/pexels-photo-25526512.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
+    ("Audio/Mic", "Rode Mic", "AUD-RODE", 1, "https://images.pexels.com/photos/25526512/pexels-photo-25526512.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
+    ("Audio/Mic", "Zoom H8", "AUD-H8", 1, "https://images.pexels.com/photos/25526512/pexels-photo-25526512.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
+    ("Cable Audio", "Cable Akai 6,5mm", "CAB-AKAI", 1, "https://images.pexels.com/photos/159674/sackcloth-sackcloth-textured-laptop-ipad-159674.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
+    ("Cable Audio", "Cable XLR", "CAB-XLR", 4, "https://images.pexels.com/photos/159674/sackcloth-sackcloth-textured-laptop-ipad-159674.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
+    ("Others", "Gimbal Zhiyun", "OTH-GIMBAL", 1, "https://images.unsplash.com/photo-1654723011680-0e037c2a4f18?crop=entropy&cs=srgb&fm=jpg&q=85"),
+    ("Others", "Box Camera", "OTH-BOX", 2, "https://images.pexels.com/photos/13616448/pexels-photo-13616448.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
+    ("Others", "Tas Camera", "OTH-TAS", 2, "https://images.pexels.com/photos/13616448/pexels-photo-13616448.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
+    ("Others", "Cable Terminal", "OTH-TERM", 2, "https://images.pexels.com/photos/159674/sackcloth-sackcloth-textured-laptop-ipad-159674.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
 ]
 
 
 async def seed_data():
     await auth_module.seed_users()
-    if await db.items.count_documents({}) == 0:
+    settings_doc = await db.settings.find_one({"key": "global"}) or {}
+    if settings_doc.get("catalog_version") != 2:
+        await db.items.delete_many({})
+        await db.bookings.delete_many({})
+        await db.access_credentials.delete_many({})
+        await db.calendar_events.delete_many({})
+        await db.notifications.delete_many({})
         await db.items.insert_many([{
-            "name": n, "category": c, "item_code": code, "photo": photo,
-            "status": "AVAILABLE", "condition": "BAIK", "location": "Gudang Utama",
-            "notes": None, "created_at": now_utc(),
-        } for n, c, code, photo in SEED_ITEMS])
+            "name": name, "category": cat, "item_code": code, "photo": photo,
+            "quantity": qty, "status": "AVAILABLE", "condition": "BAIK",
+            "location": "Gudang Utama", "notes": None, "created_at": now_utc(),
+        } for cat, name, code, qty, photo in SEED_ITEMS])
+        await db.settings.update_one({"key": "global"}, {"$set": {"catalog_version": 2}}, upsert=True)
     if await db.doors.count_documents({}) == 0:
         await db.doors.insert_one({
             "name": "Gudang Utama", "provider": "bardi", "device_id": env("TUYA_DEVICE_ID", "demo-device"),

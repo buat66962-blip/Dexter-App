@@ -48,7 +48,6 @@ class RegisterInput(BaseModel):
     email: EmailStr
     password: str
     phone: Optional[str] = None
-    whatsapp_number: Optional[str] = None
 
 
 class LoginInput(BaseModel):
@@ -105,7 +104,6 @@ async def register(payload: RegisterInput, response: Response):
         "email": email,
         "password_hash": hash_password(payload.password),
         "phone": payload.phone,
-        "whatsapp_number": payload.whatsapp_number,
         "telegram_id": None,
         "role": "user",
         "created_at": now_utc(),
@@ -186,7 +184,6 @@ async def seed_users():
                 "email": email,
                 "password_hash": hash_password(password),
                 "phone": None,
-                "whatsapp_number": None,
                 "telegram_id": None,
                 "role": role,
                 "created_at": now_utc(),

@@ -27,10 +27,20 @@ BARDI/Tuya smart door lock (kode akses temporer). UI Bahasa Indonesia, tema dark
 - Access log, audit log, notification log, admin settings buffer.
 - Telegram bot: webhook secret verification, admin whitelist, inline button approve/reject/return/extend/access, command /home /pending /overdue /akses /barang.
 
+## Model Order (v2 — GoFood style, 2026-06)
+Satu order berisi banyak alat + jumlah (pcs). Form: Nama, Tanggal Pengambilan, Jam,
+Durasi Peminjaman (4/8/24/48/72/168 jam), Acara, Lokasi. Katalog dikelompokkan per kategori
+(Camera, Battery, Memory, Lens, Multicam Set, Audio/Mic, Cable Audio, Others), stok per item,
+ketersediaan dihitung per qty × rentang waktu (bukan blok seluruh item).
+- **Invoice peminjaman**: list alat grouped per kategori + export PDF.
+- **Checklist pengembalian**: checkbox per alat, hanya bisa dicentang pada hari pengembalian (WIB);
+  pengajuan return ditolak sampai semua alat dicentang.
+- **WhatsApp dihapus total** (Meta tidak mendukung grup). Notifikasi admin lewat grup Telegram.
+
 ## Status integrasi
 - **Telegram: LIVE** — @DataEquipmentTrackerbot, grup admin "Alat" (`-1003912804350`), webhook + secret.
-- WhatsApp (Meta Cloud API): kode siap, mode SIMULASI sampai `WHATSAPP_PHONE_NUMBER_ID` + `WHATSAPP_ACCESS_TOKEN` diisi. Catatan: Meta **tidak mendukung grup**, jadi WA dipakai untuk notif ke nomor user peminjam.
-- Google Calendar: kode siap (service account), butuh `GOOGLE_SERVICE_ACCOUNT_JSON` + `GOOGLE_CALENDAR_ID=yncrewcalendar@gmail.com` yang di-share ke email service account.
+- WhatsApp: **DIHAPUS** dari sistem (Meta Cloud API tidak mendukung grup WhatsApp).
+- Google Calendar: **LIVE** — calendar `yncrewcalendar@gmail.com` ("Jadwal Pemakaian tempat dan alat") via service account `dexter@dexter-506401.iam.gserviceaccount.com`. JSON key disimpan base64 di `GOOGLE_SERVICE_ACCOUNT_JSON` (JSON mentah rusak karena dotenv meng-escape newline private key). Create/update/delete event terverifikasi.
 - BARDI/Tuya: mode SIMULASI sampai `TUYA_ACCESS_ID/SECRET/DEVICE_ID` diisi.
 
 ## Laporan (2026-06)

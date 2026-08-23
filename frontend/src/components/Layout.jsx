@@ -1,17 +1,19 @@
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { Bell, Boxes, LayoutDashboard, LogOut, Search, Ticket } from "lucide-react";
+import { Bell, Boxes, LayoutDashboard, LogOut, Search, ShoppingBag, Ticket } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useCart } from "@/context/CartContext";
 import { Button } from "@/components/ui/button";
 
 const navItems = (isAdmin) => [
   { to: "/", label: "Katalog", icon: Search, id: "nav-catalog" },
-  { to: "/peminjaman", label: "Peminjaman", icon: Ticket, id: "nav-bookings" },
+  { to: "/peminjaman", label: "Pesanan", icon: Ticket, id: "nav-bookings" },
   { to: "/notifikasi", label: "Notifikasi", icon: Bell, id: "nav-notifications" },
   ...(isAdmin ? [{ to: "/admin", label: "Admin", icon: LayoutDashboard, id: "nav-admin" }] : []),
 ];
 
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
+  const { totalQty } = useCart();
   const navigate = useNavigate();
   const items = navItems(user?.role === "admin");
 
@@ -42,6 +44,16 @@ export default function Layout({ children }) {
             ))}
           </nav>
           <div className="flex items-center gap-3">
+            <Link to="/checkout" data-testid="cart-button"
+              className="relative rounded-full p-2 text-zinc-400 transition-colors duration-200 hover:text-white">
+              <ShoppingBag className="h-5 w-5" />
+              {totalQty > 0 && (
+                <span data-testid="cart-badge"
+                  className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#007AFF] px-1 text-[10px] font-bold text-white">
+                  {totalQty}
+                </span>
+              )}
+            </Link>
             <span data-testid="current-user-name" className="hidden text-sm text-zinc-400 sm:block">
               {user?.name}
             </span>

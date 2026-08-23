@@ -1,9 +1,11 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { CartProvider } from "@/context/CartContext";
 import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import Catalog from "@/pages/Catalog";
+import Checkout from "@/pages/Checkout";
 import ItemDetail from "@/pages/ItemDetail";
 import MyBookings from "@/pages/MyBookings";
 import BookingDetail from "@/pages/BookingDetail";
@@ -25,6 +27,7 @@ function Shell() {
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/" element={<Protected><Catalog /></Protected>} />
+      <Route path="/checkout" element={<Protected><Checkout /></Protected>} />
       <Route path="/barang/:id" element={<Protected><ItemDetail /></Protected>} />
       <Route path="/peminjaman" element={<Protected><MyBookings /></Protected>} />
       <Route path="/peminjaman/:id" element={<Protected><BookingDetail /></Protected>} />
@@ -39,8 +42,10 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Shell />
-        <Toaster theme="dark" position="top-center" />
+        <CartProvider>
+          <Shell />
+          <Toaster theme="dark" position="top-center" />
+        </CartProvider>
       </AuthProvider>
     </BrowserRouter>
   );

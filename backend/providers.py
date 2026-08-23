@@ -179,47 +179,6 @@ class TelegramProvider:
         return self._call("answerCallbackQuery", {"callback_query_id": callback_id, "text": text})
 
 
-# ----------------------------------------------------------------------- whatsapp
-class WhatsAppProvider:
-    """Meta WhatsApp Cloud API. Groups are not supported by Meta — individual numbers only."""
-
-    def __init__(self):
-        self.phone_number_id = env("WHATSAPP_PHONE_NUMBER_ID")
-        self.token = env("WHATSAPP_ACCESS_TOKEN")
-        self.version = env("META_GRAPH_VERSION", "v23.0")
-        self.admin_number = env("WHATSAPP_ADMIN_NUMBER")
-
-    def configured(self) -> bool:
-        return bool(self.phone_number_id and self.token)
-
-    def send(self, to: str, text: str) -> ProviderResult:
-        if not self.configured() or not to:
-            logger.info("[SIMULATED WHATSAPP -> %s] %s", to or self.admin_number, text)
-            return ProviderResult(True, {"simulated": True}, simulated=True)
-        try:
-            r = requests.post(
-                f"https://graph.facebook.com/{self.version}/{self.phone_number_id}/messages",
-                headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
-                json={
-                    "messaging_product": "whatsapp",
-                    "recipient_type": "individual",
-                    "to": str(to).lstrip("+"),
-                    "type": "text",
-                    "text": {"body": text, "preview_url": False},
-                },
-                timeout=TIMEOUT,
-            )
-            data = r.json() if r.content else {}
-            if r.status_code >= 300:
-                return ProviderResult(False, error=str(data.get("error", {}).get("message", r.text))[:300])
-            return ProviderResult(True, {"message_id": data.get("messages", [{}])[0].get("id")})
-        except Exception as e:
-            return ProviderResult(False, error=str(e))
-
-    def send_admin(self, text: str) -> ProviderResult:
-        return self.send(self.admin_number, text)
-
-
 # ---------------------------------------------------------------- google calendar
 class CalendarProvider:
     def __init__(self):
@@ -230,10 +189,15 @@ class CalendarProvider:
         return bool(self.calendar_id and self.sa_json)
 
     def _service(self):
+        import base64
+
         from google.oauth2 import service_account  # type: ignore
         from googleapiclient.discovery import build  # type: ignore
 
-        info = json.loads(self.sa_json)
+        raw = self.sa_json
+        if not raw.lstrip().startswith("{"):
+            raw = base64.b64decode(raw).decode()
+        info = json.loads(raw)
         creds = service_account.Credentials.from_service_account_info(
             info, scopes=["https://www.googleapis.com/auth/calendar"]
         )
@@ -283,5 +247,4 @@ class CalendarProvider:
 
 
 telegram = TelegramProvider()
-whatsapp = WhatsAppProvider()
 calendar = CalendarProvider()
