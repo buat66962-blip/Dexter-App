@@ -37,6 +37,12 @@ ketersediaan dihitung per qty × rentang waktu (bukan blok seluruh item).
   pengajuan return ditolak sampai semua alat dicentang.
 - **WhatsApp dihapus total** (Meta tidak mendukung grup). Notifikasi admin lewat grup Telegram.
 
+## Fitur lanjutan (2026-06)
+- **Template Paket**: simpan set alat favorit (`templates` collection, bisa `is_shared`), sekali klik masuk keranjang, hapus oleh owner/admin.
+- **Serah Terima Foto**: upload foto kondisi alat saat ambil & saat kembali via Emergent object storage (`/api/uploads`, `/api/files/{path}`, `/bookings/{id}/handover`). Foto pengambilan setelah APPROVED, foto pengembalian hanya pada tanggal pengembalian. Maks 5 foto/fase, 8 MB/foto.
+- **Stok Live**: katalog minta tanggal + durasi, lalu menampilkan `sisa N / total pcs` per alat (GET /items?start_time&end_time).
+- **Form order**: tanggal pengambilan tanpa jam (start 08:00 WIB), durasi mode `hours` (1-12 jam, hari yang sama) atau `days` (pilih tanggal pengembalian, end 17:00 WIB). Checklist pengembalian terbuka pada tanggal pengembalian.
+
 ## Status integrasi
 - **Telegram: LIVE** — @DataEquipmentTrackerbot, grup admin "Alat" (`-1003912804350`), webhook + secret.
 - WhatsApp: **DIHAPUS** dari sistem (Meta Cloud API tidak mendukung grup WhatsApp).

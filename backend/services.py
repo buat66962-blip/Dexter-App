@@ -188,6 +188,8 @@ async def booking_detail(booking: dict) -> dict:
     data["checklist"] = booking.get("checklist") or build_checklist(booking.get("lines", []))
     data["checklist_unlocked"] = return_day_reached(booking)
     data["checklist_complete"] = bool(data["checklist"]) and all(r.get("checked") for r in data["checklist"])
+    data["pickup_photos"] = booking.get("pickup_photos", [])
+    data["return_photos"] = booking.get("return_photos", [])
     cred = await db.access_credentials.find_one({"booking_id": str(booking["_id"]), "status": {"$ne": "REVOKED"}}, sort=[("_id", -1)])
     if cred:
         door = await db.doors.find_one({"_id": oid(cred["door_id"])})

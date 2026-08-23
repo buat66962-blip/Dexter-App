@@ -10,12 +10,13 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
 import auth as auth_module
 import services as svc
+import storage
 from core import audit, db, env, is_valid_oid, now_utc, oid, ser
 from providers import telegram
 
@@ -51,8 +52,9 @@ class BookingLine(BaseModel):
 class BookingInput(BaseModel):
     lines: List[BookingLine]
     pickup_date: str
-    pickup_time: str = "09:00"
+    duration_type: str = "hours"  # "hours" (hari yang sama) | "days" (beda hari)
     duration_hours: int = 8
+    return_date: Optional[str] = None
     purpose: str
     location: Optional[str] = ""
 
@@ -60,6 +62,18 @@ class BookingInput(BaseModel):
 class ChecklistInput(BaseModel):
     item_id: str
     checked: bool = True
+
+
+class TemplateInput(BaseModel):
+    name: str
+    lines: List[BookingLine]
+    is_shared: bool = False
+
+
+class HandoverInput(BaseModel):
+    phase: str  # "pickup" | "return"
+    photos: List[str]
+    notes: Optional[str] = ""
 
 
 class ReturnInput(BaseModel):
@@ -187,13 +201,26 @@ async def _next_code() -> str:
 async def create_booking(payload: BookingInput, user=CurrentUser):
     if not payload.lines:
         raise HTTPException(400, "Keranjang masih kosong")
-    if payload.duration_hours < 1:
-        raise HTTPException(400, "Durasi peminjaman minimal 1 jam")
     try:
-        start = svc.parse_dt(f"{payload.pickup_date}T{payload.pickup_time}:00+07:00")
+        start = svc.parse_dt(f"{payload.pickup_date}T08:00:00+07:00")
     except ValueError:
-        raise HTTPException(400, "Tanggal atau jam pengambilan tidak valid")
-    end = start + timedelta(hours=payload.duration_hours)
+        raise HTTPException(400, "Tanggal pengambilan tidak valid")
+
+    if payload.duration_type == "days":
+        if not payload.return_date:
+            raise HTTPException(400, "Pilih tanggal pengembalian")
+        try:
+            end = svc.parse_dt(f"{payload.return_date}T17:00:00+07:00")
+        except ValueError:
+            raise HTTPException(400, "Tanggal pengembalian tidak valid")
+        if end <= start:
+            raise HTTPException(400, "Tanggal pengembalian harus setelah tanggal pengambilan")
+        duration_hours = int((end - start).total_seconds() // 3600)
+    else:
+        if payload.duration_hours < 1 or payload.duration_hours > 12:
+            raise HTTPException(400, "Durasi jam harus 1-12 jam untuk peminjaman hari yang sama")
+        duration_hours = payload.duration_hours
+        end = start + timedelta(hours=duration_hours)
 
     lines = []
     for line in payload.lines:
@@ -222,12 +249,17 @@ async def create_booking(payload: BookingInput, user=CurrentUser):
         "item_ids": [l["item_id"] for l in lines],
         "start_time": start,
         "end_time": end,
-        "duration_hours": payload.duration_hours,
+        "pickup_date": payload.pickup_date,
+        "return_date": payload.return_date or payload.pickup_date,
+        "duration_type": payload.duration_type,
+        "duration_hours": duration_hours,
         "purpose": payload.purpose,
         "location": payload.location or "",
         "status": svc.STATUS_PENDING,
         "approved_by": None,
         "checklist": [],
+        "pickup_photos": [],
+        "return_photos": [],
         "created_at": now_utc(),
     }
     res = await db.bookings.insert_one(doc)
@@ -239,9 +271,10 @@ async def create_booking(payload: BookingInput, user=CurrentUser):
     for l in lines:
         by_cat.setdefault(l["category"] or "Lainnya", []).append(f"• {l['name']} ({l['qty']} pcs)")
     item_text = "\n".join(f"<b>{c}</b>\n" + "\n".join(rows) for c, rows in by_cat.items())
+    durasi = f"{duration_hours} jam (hari yang sama)" if payload.duration_type == "hours" else f"{duration_hours // 24 or 1} hari"
     await svc.notify_admin("BOOKING_CREATED", (
         f"🔔 <b>ORDER PEMINJAMAN BARU</b>\n\n👤 {user['name']}\n"
-        f"📅 Ambil: {svc.fmt(start)}\n⏱️ Durasi: {payload.duration_hours} jam (kembali {svc.fmt(end)})\n"
+        f"📅 Ambil: {payload.pickup_date}\n↩️ Kembali: {doc['return_date']}\n⏱️ Durasi: {durasi}\n"
         f"🎬 Acara: {payload.purpose}\n📍 Lokasi: {payload.location or '-'}\n\n{item_text}"
     ), bid, buttons=[[
         {"text": "✅ APPROVE", "callback_data": f"approve:{bid}"},
@@ -313,6 +346,111 @@ async def return_request(booking_id: str, payload: ReturnInput, user=CurrentUser
         return await svc.request_return(b, payload.condition, payload.notes or "", payload.photo)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@api.post("/uploads")
+async def upload_photo(file: UploadFile = File(...), user=CurrentUser):
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(400, "Foto maksimal 8 MB")
+    path, mime = storage.build_path(user["id"], file.filename or "foto.jpg")
+    content_type = file.content_type if (file.content_type or "").startswith("image/") else mime
+    try:
+        result = storage.put_object(path, data, content_type)
+    except Exception as e:
+        logger.warning("upload gagal: %s", e)
+        raise HTTPException(502, "Upload foto gagal, coba lagi")
+    await db.files.insert_one({
+        "storage_path": result["path"],
+        "original_filename": file.filename,
+        "content_type": content_type,
+        "size": result.get("size", len(data)),
+        "user_id": user["id"],
+        "is_deleted": False,
+        "created_at": now_utc(),
+    })
+    return {"path": result["path"], "url": f"/api/files/{result['path']}"}
+
+
+@api.get("/files/{path:path}")
+async def download_file(path: str, user=CurrentUser):
+    record = await db.files.find_one({"storage_path": path, "is_deleted": False})
+    if not record:
+        raise HTTPException(404, "File tidak ditemukan")
+    data, content_type = storage.get_object(path)
+    return Response(content=data, media_type=record.get("content_type", content_type))
+
+
+@api.post("/bookings/{booking_id}/handover")
+async def handover(booking_id: str, payload: HandoverInput, user=CurrentUser):
+    b = await _load_booking(booking_id, user)
+    if payload.phase not in ("pickup", "return"):
+        raise HTTPException(400, "Fase harus pickup atau return")
+    if len(payload.photos) > 5:
+        raise HTTPException(400, "Maksimal 5 foto per fase")
+    field = "pickup_photos" if payload.phase == "pickup" else "return_photos"
+    if payload.phase == "pickup" and b["status"] not in (svc.STATUS_APPROVED, svc.STATUS_ACTIVE, svc.STATUS_OVERDUE):
+        raise HTTPException(400, "Foto pengambilan hanya untuk order yang sudah disetujui")
+    if payload.phase == "return" and not svc.return_day_reached(b):
+        raise HTTPException(400, "Foto pengembalian baru bisa diunggah pada hari pengembalian")
+    await db.bookings.update_one({"_id": b["_id"]}, {"$set": {
+        field: payload.photos,
+        f"{field}_notes": payload.notes or "",
+        f"{field}_at": now_utc(),
+    }})
+    await audit(f"HANDOVER_{payload.phase.upper()}", user["id"], booking_id, {"count": len(payload.photos)})
+    return await svc.booking_detail(await db.bookings.find_one({"_id": b["_id"]}))
+
+
+@api.get("/templates")
+async def list_templates(user=CurrentUser):
+    out = []
+    async for t in db.templates.find({"$or": [{"owner_id": user["id"]}, {"is_shared": True}]}).sort("created_at", -1):
+        out.append(ser(t))
+    return out
+
+
+@api.post("/templates")
+async def create_template(payload: TemplateInput, user=CurrentUser):
+    if not payload.lines:
+        raise HTTPException(400, "Template harus punya minimal satu alat")
+    lines = []
+    for line in payload.lines:
+        if not is_valid_oid(line.item_id):
+            raise HTTPException(400, "Barang tidak valid")
+        item = await db.items.find_one({"_id": oid(line.item_id)})
+        if not item:
+            raise HTTPException(404, "Barang tidak ditemukan")
+        lines.append({
+            "item_id": line.item_id, "name": item["name"], "item_code": item.get("item_code"),
+            "category": item.get("category"), "qty": max(1, line.qty), "photo": item.get("photo"),
+            "max": int(item.get("quantity", 1)),
+        })
+    doc = {
+        "name": payload.name.strip() or "Paket Tanpa Nama",
+        "owner_id": user["id"],
+        "owner_name": user["name"],
+        "is_shared": payload.is_shared,
+        "lines": lines,
+        "created_at": now_utc(),
+    }
+    res = await db.templates.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    await audit("TEMPLATE_CREATED", user["id"], metadata={"name": doc["name"]})
+    return ser(doc)
+
+
+@api.delete("/templates/{template_id}")
+async def delete_template(template_id: str, user=CurrentUser):
+    if not is_valid_oid(template_id):
+        raise HTTPException(404, "Template tidak ditemukan")
+    t = await db.templates.find_one({"_id": oid(template_id)})
+    if not t:
+        raise HTTPException(404, "Template tidak ditemukan")
+    if t["owner_id"] != user["id"] and user["role"] != "admin":
+        raise HTTPException(403, "Bukan template kamu")
+    await db.templates.delete_one({"_id": oid(template_id)})
+    return {"ok": True}
 
 
 # ----------------------------------------------------------------------- admin
@@ -657,6 +795,11 @@ async def scheduler_loop():
 @app.on_event("startup")
 async def startup():
     await seed_data()
+    try:
+        storage.init_storage()
+        logger.info("object storage siap")
+    except Exception as e:
+        logger.warning("storage init gagal: %s", e)
     asyncio.create_task(scheduler_loop())
 
 

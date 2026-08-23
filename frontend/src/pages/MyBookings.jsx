@@ -6,6 +6,8 @@ import StatusBadge from "@/components/StatusBadge";
 
 const fmt = (iso) =>
   new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const fmtDate = (iso) =>
+  new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
 
 export default function MyBookings() {
   const [bookings, setBookings] = useState([]);
@@ -29,7 +31,7 @@ export default function MyBookings() {
                 <div className="space-y-2">
                   <p className="font-mono text-xs text-zinc-500">INV-{b.code} · {b.total_qty} pcs</p>
                   <h3 className="font-heading text-xl font-medium tracking-tight">{b.purpose}</h3>
-                  <p className="text-sm text-zinc-400">Ambil {fmt(b.start_time)} · kembali {fmt(b.end_time)}</p>
+                  <p className="text-sm text-zinc-400">Ambil {fmtDate(b.start_time)} · kembali {fmtDate(b.end_time)}</p>
                   <p className="text-sm text-zinc-500">
                     {b.lines.slice(0, 3).map((l) => `${l.name} (${l.qty})`).join(", ")}
                     {b.lines.length > 3 ? ` +${b.lines.length - 3} lain` : ""}

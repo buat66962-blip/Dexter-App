@@ -4,6 +4,7 @@ import { ArrowLeft, Copy, Download, KeyRound, Loader2, Lock } from "lucide-react
 import { toast } from "sonner";
 import { api, errMsg } from "@/api";
 import StatusBadge from "@/components/StatusBadge";
+import PhotoHandover from "@/components/PhotoHandover";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -61,8 +62,9 @@ export default function BookingDetail() {
     line(`No. Invoice: INV-${b.code}`);
     y += 3;
     line(`Nama: ${b.user_name}`);
-    line(`Tanggal Pengambilan: ${fmt(b.start_time)}`);
-    line(`Durasi: ${b.duration_hours || "-"} jam (kembali ${fmt(b.end_time)})`);
+    line(`Tanggal Pengambilan: ${fmtDate(b.start_time)}`);
+    line(`Tanggal Pengembalian: ${fmtDate(b.end_time)}`);
+    line(`Durasi: ${b.duration_type === "days" ? `${Math.max(1, Math.round((b.duration_hours || 24) / 24))} hari` : `${b.duration_hours} jam (hari yang sama)`}`);
     line(`Acara: ${b.purpose}`);
     line(`Lokasi: ${b.location || "-"}`);
     y += 3;
@@ -101,7 +103,7 @@ export default function BookingDetail() {
             {b.purpose}
           </h1>
           <p className="mt-3 text-sm text-zinc-400">
-            Ambil {fmt(b.start_time)} · kembali {fmt(b.end_time)} · {b.total_qty} pcs
+            Ambil {fmtDate(b.start_time)} · kembali {fmtDate(b.end_time)} · {b.total_qty} pcs
           </p>
         </div>
         <StatusBadge status={b.status} testId="booking-detail-status" />
@@ -166,8 +168,15 @@ export default function BookingDetail() {
 
         <dl className="mt-8 grid gap-6 sm:grid-cols-2">
           <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Nama</dt><dd className="mt-2">{b.user_name}</dd></div>
-          <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Tanggal Pengambilan</dt><dd className="mt-2">{fmt(b.start_time)}</dd></div>
-          <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Durasi Peminjaman</dt><dd className="mt-2">{b.duration_hours || "-"} jam · kembali {fmt(b.end_time)}</dd></div>
+          <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Tanggal Pengambilan</dt><dd className="mt-2">{fmtDate(b.start_time)}</dd></div>
+          <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Tanggal Pengembalian</dt><dd className="mt-2">{fmtDate(b.end_time)}</dd></div>
+          <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Durasi Peminjaman</dt>
+            <dd className="mt-2">
+              {b.duration_type === "days"
+                ? `${Math.max(1, Math.round((b.duration_hours || 24) / 24))} hari`
+                : `${b.duration_hours || "-"} jam (hari yang sama)`}
+            </dd>
+          </div>
           <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Acara</dt><dd className="mt-2">{b.purpose}</dd></div>
           <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Lokasi</dt><dd className="mt-2">{b.location || "-"}</dd></div>
           <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Total Alat</dt><dd className="mt-2">{b.total_qty} pcs</dd></div>
@@ -194,6 +203,20 @@ export default function BookingDetail() {
           </p>
         )}
       </div>
+
+      {["APPROVED", "BORROWED", "OVERDUE", "RETURN_REQUESTED", "RETURNED"].includes(b.status) && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <PhotoHandover bookingId={id} phase="pickup" photos={b.pickup_photos}
+            locked={["RETURNED"].includes(b.status)}
+            lockedText="Order sudah selesai, foto pengambilan dikunci."
+            onSaved={setB} />
+          <PhotoHandover bookingId={id} phase="return" photos={b.return_photos}
+            locked={!b.checklist_unlocked || b.status === "RETURNED"}
+            lockedText={b.status === "RETURNED" ? "Order sudah selesai, foto pengembalian dikunci."
+              : `Terbuka pada tanggal pengembalian (${fmtDate(b.end_time)}).`}
+            onSaved={setB} />
+        </div>
+      )}
 
       {canReturn && (
         <div data-testid="return-checklist-card" className="rounded-2xl border border-white/10 bg-zinc-900 p-8">

@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 3 focused on new schema (duration_type hours|days, return_date, no pickup_time), Templates CRUD + shared visibility, Photo Handover (pickup/return) with Emergent object storage, and Live Stock via ?start_time&end_time. Rewrote /app/backend/tests/backend_test.py to the new schema and added feature coverage. Result: 28/28 pytest PASS. Frontend UI verified against public URL: catalog availability-filter renders live 'sisa X / Y pcs' badges (with color states) after date is picked; Tambah button hidden when sisa 0 ('Sudah dipesan penuh'); template chips (TEST_UI_paket + Multicam 3 Kamera) render, one-click use-template populates cart, delete-template chip removes it. Checkout has NO pickup-time input; duration-type-hours / duration-type-days toggle works; when 'days' selected, checkout-return-date-input appears; return-date-preview text updates to the actual pengembalian date (or pickup_date for hours mode); save-template dialog + confirm-save-template-button creates a template successfully; submit-order-button POSTs /api/bookings 200 and navigates to /peminjaman/:id; invoice card shows Tanggal Pengambilan / Tanggal Pengembalian / Durasi. For APPROVED booking with return_date +2 days: handover-pickup and handover-return cards visible, upload-button-pickup enabled, upload-button-return absent (locked until return day) — matches spec exactly. User accessing /admin is properly redirected (RBAC). Telegram approve callback still LIVE (regression pass), Google Calendar LIVE approved order returns simulated=false + yncrewcalendar@gmail.com. Uploads endpoint working end-to-end: valid image 200, >8MB rejected 400, /files/{path} requires cookie (401 without), returns image content-type when logged in.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Checkout > Simpan Template Dialog", "issues": ["a11y warning: DialogContent missing Description or aria-describedby (Radix dev warning). Also, dialog does not auto-close after saveTemplate success — user must close manually. Minor UX."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "(Nit) Close save-template dialog after successful save in Checkout.jsx to avoid blocking submit button.",
+    "(a11y) Add DialogDescription (or aria-describedby) to save-template DialogContent to silence Radix warning."
+  ],
+  "critical_code_review_comments": [
+    "server.py create_booking: when duration_type='days' and return_date < pickup_date the resulting end<=start check catches it, but the 400 message returned is 'Tanggal pengembalian harus setelah tanggal pengambilan' — spec allowed either that or the more specific 'sebelum'. Both are acceptable.",
+    "server.py handover: rejects phase='pickup' when booking is PENDING with generic message 'Foto pengambilan hanya untuk order yang sudah disetujui'. Consider explicit 'baru bisa diunggah setelah APPROVE' text to match invoice.",
+    "storage.put_object 404 branch re-inits key then retries — good self-heal. But no size-check on server side; front-end enforces 5-photo cap in PhotoHandover.jsx via slice(0,5). Consider enforcing in backend too.",
+    "Checkout.jsx save-template does not close Dialog automatically (state remains open) — UX blocker for keyboard users.",
+    "Templates lines snapshot 'max' from item.quantity at time of template creation; if admin later reduces stock the template's 'max' will be stale. Consider refreshing max at list time.",
+    "services.available_qty computes booked_qty by iterating BLOCKING_STATUSES bookings — O(N). At current scale fine; consider aggregation index on (item_ids,status,start_time,end_time) for scale."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (28/28)", "frontend": "100% key flows verified"},
+  "test_credentials": "Admin admin@kantor.id / admin123; User ghozy@kantor.id / ghozy123; TG webhook secret wh_secret_inventory_2026; TELEGRAM_ADMIN_CHAT_IDS=-1003912804350",
+  "seed_data_creation": "Several TEST_-prefixed bookings + templates created during tests, most cancelled/deleted in-tests. A couple of TEST_UI_paket/TEST_paket_shared templates may remain visible in admin's list; harmless.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run tests as: `REACT_APP_BACKEND_URL=<public-url> python -m pytest backend/tests/backend_test.py -o addopts='' -v` (avoid xdist). Sony A7IV YN, Battery Dummy FZ100, SDCard 128GB and Multicam HDMI Fiber Optic are the high-qty seeds — use them for parallel-safe stock tests. Google Calendar and Telegram are LIVE — keep TEST_ prefix on purpose and cancel/confirm-return in fixtures to avoid leftover events. Object storage init requires EMERGENT_LLM_KEY env; already validated. New schema in /api/bookings must include duration_type + (return_date OR duration_hours), never pickup_time.",
+  "rca of the issue": "N/A — all iteration 3 acceptance criteria pass."
+}
