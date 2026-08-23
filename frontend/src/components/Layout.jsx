@@ -1,5 +1,5 @@
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { Bell, Bookmark, Boxes, LayoutDashboard, LogOut, Search, ShoppingBag, Ticket } from "lucide-react";
+import { Bookmark, Boxes, LayoutDashboard, LogOut, Search, ShoppingBag, Ticket } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useCart } from "@/context/CartContext";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,6 @@ const navItems = (isAdmin) => [
   { to: "/", label: "Katalog", icon: Search, id: "nav-catalog" },
   { to: "/paket", label: "Paket", icon: Bookmark, id: "nav-templates" },
   { to: "/peminjaman", label: "Booking", icon: Ticket, id: "nav-bookings" },
-  { to: "/notifikasi", label: "Notifikasi", icon: Bell, id: "nav-notifications" },
   ...(isAdmin ? [{ to: "/admin", label: "Admin", icon: LayoutDashboard, id: "nav-admin" }] : []),
 ];
 
@@ -26,7 +25,7 @@ export default function Layout({ children }) {
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#007AFF]">
               <Boxes className="h-5 w-5 text-white" />
             </span>
-            <span className="font-heading text-lg font-bold tracking-tight">Gudang Kantor</span>
+            <span className="font-heading text-lg font-bold tracking-tight">Dexter</span>
           </Link>
           <nav className="hidden items-center gap-1 md:flex">
             {items.map((i) => (

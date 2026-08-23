@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { Loader2, Minus, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { api, errMsg } from "@/api";
 import StatusBadge from "@/components/StatusBadge";
@@ -10,8 +10,11 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "-");
 
@@ -19,6 +22,37 @@ const StatCard = ({ label, value, testId, accent }) => (
   <div data-testid={testId} className="rounded-2xl border border-white/10 bg-zinc-900 p-6">
     <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">{label}</p>
     <p className={`mt-3 font-heading text-3xl font-bold ${accent || "text-zinc-100"}`}>{value}</p>
+  </div>
+);
+
+
+const ItemForm = ({ value, onChange, categories, prefix }) => (
+  <div className="space-y-4">
+    {[["name", "Nama"], ["item_code", "Kode Alat"], ["photo", "URL Foto"], ["location", "Lokasi"], ["condition", "Kondisi"]].map(([k, l]) => (
+      <div key={k} className="space-y-2">
+        <Label className="text-xs uppercase tracking-[0.2em] text-zinc-400">{l}</Label>
+        <Input data-testid={`${prefix}-${k}-input`} value={value[k] || ""}
+          onChange={(e) => onChange({ ...value, [k]: e.target.value })}
+          className="h-12 rounded-xl border-white/10 bg-zinc-950" />
+      </div>
+    ))}
+    <div className="space-y-2">
+      <Label className="text-xs uppercase tracking-[0.2em] text-zinc-400">Kategori</Label>
+      <Select value={value.category || ""} onValueChange={(v) => onChange({ ...value, category: v })}>
+        <SelectTrigger data-testid={`${prefix}-category-select`} className="h-12 rounded-xl border-white/10 bg-zinc-950">
+          <SelectValue placeholder="Pilih kategori" />
+        </SelectTrigger>
+        <SelectContent className="max-h-60 border-white/10 bg-zinc-900 text-zinc-100">
+          {categories.map((c) => <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+    <div className="space-y-2">
+      <Label className="text-xs uppercase tracking-[0.2em] text-zinc-400">Jumlah Stok</Label>
+      <Input data-testid={`${prefix}-quantity-input`} type="number" min="1" value={value.quantity ?? 1}
+        onChange={(e) => onChange({ ...value, quantity: Number(e.target.value) })}
+        className="h-12 rounded-xl border-white/10 bg-zinc-950" />
+    </div>
   </div>
 );
 
@@ -30,21 +64,25 @@ export default function Admin() {
   const [accessLogs, setAccessLogs] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [notifLogs, setNotifLogs] = useState([]);
-  const [settings, setSettings] = useState({ buffer_before_minutes: 10, buffer_after_minutes: 15 });
   const [report, setReport] = useState(null);
   const [reportDays, setReportDays] = useState(30);
   const [busy, setBusy] = useState(false);
-  const [newItem, setNewItem] = useState({ name: "", category: "", item_code: "", photo: "", condition: "BAIK", location: "Gudang Utama", quantity: 1 });
+  const [categories, setCategories] = useState([]);
+  const [editItem, setEditItem] = useState(null);
+  const [newCategory, setNewCategory] = useState("");
+  const [renaming, setRenaming] = useState(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [newItem, setNewItem] = useState({ name: "", category: "", item_code: "", photo: "", condition: "BAIK", location: "Storage Utama", quantity: 1 });
 
   const load = useCallback(async () => {
     try {
-      const [s, b, i, a, al, au, nl, st] = await Promise.all([
+      const [s, b, i, a, al, au, nl, cat] = await Promise.all([
         api.get("/admin/stats"), api.get("/admin/bookings"), api.get("/items"),
         api.get("/admin/access-credentials"), api.get("/admin/access-logs"),
-        api.get("/admin/audit-logs"), api.get("/admin/notifications-log"), api.get("/settings"),
+        api.get("/admin/audit-logs"), api.get("/admin/notifications-log"), api.get("/categories"),
       ]);
       setStats(s.data); setBookings(b.data); setItems(i.data); setAccess(a.data);
-      setAccessLogs(al.data); setAuditLogs(au.data); setNotifLogs(nl.data); setSettings(st.data);
+      setAccessLogs(al.data); setAuditLogs(au.data); setNotifLogs(nl.data); setCategories(cat.data);
     } catch (e) { toast.error(errMsg(e)); }
   }, []);
 
@@ -114,7 +152,7 @@ export default function Admin() {
 
       <Tabs defaultValue="approval">
         <TabsList className="flex w-full flex-wrap justify-start gap-2 bg-transparent p-0">
-          {[["approval", "Approval"], ["peminjaman", "Peminjaman"], ["akses", "Akses"], ["inventaris", "Inventaris"], ["laporan", "Laporan"], ["log", "Log"], ["pengaturan", "Pengaturan"]].map(([v, l]) => (
+          {[["approval", "Approval"], ["peminjaman", "Peminjaman"], ["akses", "Akses"], ["inventaris", "Inventaris"], ["laporan", "Laporan"], ["log", "Log"]].map(([v, l]) => (
             <TabsTrigger key={v} value={v} data-testid={`tab-${v}`}
               className="rounded-full border border-white/10 px-5 py-2 text-sm data-[state=active]:bg-white/10 data-[state=active]:text-white">
               {l}
@@ -257,55 +295,153 @@ export default function Admin() {
           </div>
         </TabsContent>
 
-        <TabsContent value="inventaris" className="mt-8 space-y-6">
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button data-testid="add-item-button" className="h-12 rounded-full bg-[#007AFF] px-6 font-semibold text-white hover:bg-[#0069DB]">
-                Tambah Barang
+        <TabsContent value="inventaris" className="mt-8 space-y-8">
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-zinc-900 p-6">
+            <h2 className="text-xs uppercase tracking-[0.2em] text-zinc-400">Kategori Alat</h2>
+            <div className="flex flex-wrap gap-2">
+              <Input data-testid="new-category-input" value={newCategory}
+                onChange={(e) => setNewCategory(e.target.value)} placeholder="Nama kategori baru"
+                className="h-12 max-w-xs rounded-xl border-white/10 bg-zinc-950" />
+              <Button data-testid="add-category-button" disabled={busy || !newCategory.trim()}
+                onClick={() => act(async () => { await api.post("/categories", { name: newCategory }); setNewCategory(""); }, "Kategori ditambahkan")}
+                className="h-12 rounded-full bg-[#007AFF] px-6 font-semibold text-white hover:bg-[#0069DB]">
+                Tambah Kategori
               </Button>
-            </DialogTrigger>
-            <DialogContent className="border-white/10 bg-zinc-900 text-zinc-100">
-              <DialogHeader><DialogTitle className="font-heading">Tambah Barang</DialogTitle></DialogHeader>
-              <div className="space-y-4">
-                {[["name", "Nama"], ["category", "Kategori"], ["item_code", "Kode Barang"], ["quantity", "Jumlah Stok"], ["photo", "URL Foto"]].map(([k, l]) => (
-                  <div key={k} className="space-y-2">
-                    <Label className="text-xs uppercase tracking-[0.2em] text-zinc-400">{l}</Label>
-                    <Input data-testid={`item-${k}-input`} value={newItem[k]}
-                      type={k === "quantity" ? "number" : "text"}
-                      onChange={(e) => setNewItem({ ...newItem, [k]: k === "quantity" ? Number(e.target.value) : e.target.value })}
-                      className="h-12 rounded-xl border-white/10 bg-zinc-950" />
+            </div>
+            <div data-testid="category-list" className="space-y-2">
+              {categories.map((c) => (
+                <div key={c.name} data-testid={`category-row-${c.name.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-zinc-950/60 px-4 py-3">
+                  {renaming?.old === c.name ? (
+                    <div className="flex flex-1 flex-wrap items-center gap-2">
+                      <Input data-testid="rename-category-input" value={renaming.value}
+                        onChange={(e) => setRenaming({ ...renaming, value: e.target.value })}
+                        className="h-10 max-w-xs rounded-lg border-white/10 bg-zinc-900" />
+                      <Button data-testid="save-category-rename" disabled={busy}
+                        onClick={() => act(async () => {
+                          await api.put(`/categories/${encodeURIComponent(c.name)}`, { new_name: renaming.value });
+                          setRenaming(null);
+                        }, "Kategori diubah")}
+                        className="h-10 rounded-full bg-[#007AFF] px-5 text-xs font-semibold text-white">Simpan</Button>
+                      <Button variant="outline" onClick={() => setRenaming(null)}
+                        className="h-10 rounded-full border-white/10 bg-transparent px-5 text-xs text-zinc-300">Batal</Button>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <p className="text-sm font-medium">{c.name}</p>
+                        <p className="font-mono text-xs text-zinc-500">{c.item_count} jenis · {c.total_qty} pcs</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button data-testid={`rename-category-${c.name.toLowerCase().replace(/[^a-z0-9]/g, "-")}`} variant="outline"
+                          onClick={() => setRenaming({ old: c.name, value: c.name })}
+                          className="h-10 rounded-full border-white/10 bg-transparent px-4 text-xs text-zinc-300 hover:bg-white/10">
+                          Ubah Nama
+                        </Button>
+                        <Button data-testid={`delete-category-${c.name.toLowerCase().replace(/[^a-z0-9]/g, "-")}`} variant="outline" disabled={busy}
+                          onClick={() => act(() => api.delete(`/categories/${encodeURIComponent(c.name)}`), "Kategori dihapus")}
+                          className="h-10 rounded-full border-rose-500/40 bg-transparent px-4 text-xs text-rose-400 hover:bg-rose-500/10">
+                          Hapus
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-xs uppercase tracking-[0.2em] text-zinc-400">Daftar Alat</h2>
+              <Dialog open={addOpen} onOpenChange={setAddOpen}>
+                <DialogTrigger asChild>
+                  <Button data-testid="add-item-button" className="h-12 rounded-full bg-[#007AFF] px-6 font-semibold text-white hover:bg-[#0069DB]">
+                    Tambah Alat
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-h-[85vh] overflow-y-auto border-white/10 bg-zinc-900 text-zinc-100">
+                  <DialogHeader>
+                    <DialogTitle className="font-heading">Tambah Alat</DialogTitle>
+                    <DialogDescription className="text-zinc-500">Lengkapi data alat baru untuk katalog.</DialogDescription>
+                  </DialogHeader>
+                  <ItemForm value={newItem} onChange={setNewItem} categories={categories} prefix="item" />
+                  <Button data-testid="save-item-button" disabled={busy}
+                    onClick={() => act(async () => { await api.post("/items", newItem); setAddOpen(false); }, "Alat ditambahkan")}
+                    className="h-12 w-full rounded-full bg-[#007AFF] font-semibold text-white hover:bg-[#0069DB]">
+                    Simpan
+                  </Button>
+                </DialogContent>
+              </Dialog>
+            </div>
+
+            <div data-testid="admin-items-list" className="space-y-3">
+              {items.map((i) => (
+                <div key={i.id} className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-zinc-900 p-5">
+                  <div className="flex items-center gap-4">
+                    <img src={i.photo} alt={i.name} className="h-14 w-14 rounded-xl object-cover" />
+                    <div>
+                      <p className="font-heading text-lg">{i.name}</p>
+                      <p className="font-mono text-xs text-zinc-500">{i.item_code} · {i.category} · {i.quantity} pcs</p>
+                    </div>
                   </div>
-                ))}
-                <Button data-testid="save-item-button" disabled={busy}
-                  onClick={() => act(() => api.post("/items", newItem), "Barang ditambahkan")}
-                  className="h-12 w-full rounded-full bg-[#007AFF] font-semibold text-white hover:bg-[#0069DB]">
-                  Simpan
-                </Button>
-              </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <StatusBadge status={i.status} />
+                    <div className="flex items-center gap-2 rounded-full border border-white/10 px-2 py-1">
+                      <button data-testid={`qty-dec-${i.item_code}`} disabled={busy || i.quantity <= 1}
+                        onClick={() => act(() => api.put(`/items/${i.id}`, { ...i, quantity: i.quantity - 1 }), "Stok dikurangi")}
+                        className="rounded-full p-2 text-zinc-300 hover:bg-white/10 disabled:opacity-30">
+                        <Minus className="h-3.5 w-3.5" />
+                      </button>
+                      <span data-testid={`qty-value-${i.item_code}`} className="min-w-10 text-center font-mono text-sm">{i.quantity}</span>
+                      <button data-testid={`qty-inc-${i.item_code}`} disabled={busy}
+                        onClick={() => act(() => api.put(`/items/${i.id}`, { ...i, quantity: i.quantity + 1 }), "Stok ditambah")}
+                        className="rounded-full p-2 text-zinc-300 hover:bg-white/10 disabled:opacity-30">
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <Button data-testid={`edit-item-${i.item_code}`} variant="outline"
+                      onClick={() => setEditItem({ ...i })}
+                      className="h-10 rounded-full border-white/10 bg-transparent px-4 text-xs text-zinc-300 hover:bg-white/10">
+                      Edit
+                    </Button>
+                    <Button data-testid={`toggle-maintenance-${i.item_code}`} variant="outline" disabled={busy}
+                      onClick={() => act(() => api.put(`/items/${i.id}`, { ...i, status: i.status === "MAINTENANCE" ? "AVAILABLE" : "MAINTENANCE" }), "Status diubah")}
+                      className="h-10 rounded-full border-white/10 bg-transparent px-4 text-xs text-zinc-300 hover:bg-white/10">
+                      {i.status === "MAINTENANCE" ? "Aktifkan" : "Maintenance"}
+                    </Button>
+                    <Button data-testid={`delete-item-${i.item_code}`} variant="outline" disabled={busy}
+                      onClick={() => act(() => api.delete(`/items/${i.id}`), "Alat dihapus")}
+                      className="h-10 rounded-full border-rose-500/40 bg-transparent px-4 text-xs text-rose-400 hover:bg-rose-500/10">
+                      Hapus
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <Dialog open={!!editItem} onOpenChange={(v) => !v && setEditItem(null)}>
+            <DialogContent className="max-h-[85vh] overflow-y-auto border-white/10 bg-zinc-900 text-zinc-100">
+              <DialogHeader>
+                <DialogTitle className="font-heading">Edit Alat</DialogTitle>
+                <DialogDescription className="text-zinc-500">Ubah nama, kategori, kode, stok, atau foto alat.</DialogDescription>
+              </DialogHeader>
+              {editItem && (
+                <>
+                  <ItemForm value={editItem} onChange={setEditItem} categories={categories} prefix="edit-item" />
+                  <Button data-testid="save-item-edit-button" disabled={busy}
+                    onClick={() => act(async () => {
+                      await api.put(`/items/${editItem.id}`, editItem);
+                      setEditItem(null);
+                    }, "Alat diperbarui")}
+                    className="h-12 w-full rounded-full bg-[#007AFF] font-semibold text-white hover:bg-[#0069DB]">
+                    Simpan Perubahan
+                  </Button>
+                </>
+              )}
             </DialogContent>
           </Dialog>
-
-          <div data-testid="admin-items-list" className="space-y-3">
-            {items.map((i) => (
-              <div key={i.id} className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-zinc-900 p-5">
-                <div className="flex items-center gap-4">
-                  <img src={i.photo} alt={i.name} className="h-14 w-14 rounded-xl object-cover" />
-                  <div>
-                    <p className="font-heading text-lg">{i.name}</p>
-                    <p className="font-mono text-xs text-zinc-500">{i.item_code} · {i.category} · {i.quantity} pcs</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <StatusBadge status={i.status} />
-                  <Button data-testid={`toggle-maintenance-${i.item_code}`} variant="outline" disabled={busy}
-                    onClick={() => act(() => api.put(`/items/${i.id}`, { ...i, status: i.status === "MAINTENANCE" ? "AVAILABLE" : "MAINTENANCE" }), "Status diubah")}
-                    className="h-10 rounded-full border-white/10 bg-transparent px-4 text-xs text-zinc-300 hover:bg-white/10">
-                    {i.status === "MAINTENANCE" ? "Aktifkan" : "Maintenance"}
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
         </TabsContent>
 
         <TabsContent value="laporan" className="mt-8 space-y-8">
@@ -414,28 +550,6 @@ export default function Admin() {
           ))}
         </TabsContent>
 
-        <TabsContent value="pengaturan" className="mt-8 max-w-md space-y-6">
-          <div className="space-y-2">
-            <Label className="text-xs uppercase tracking-[0.2em] text-zinc-400">Buffer sebelum (menit)</Label>
-            <Input data-testid="buffer-before-input" type="number" value={settings.buffer_before_minutes}
-              onChange={(e) => setSettings({ ...settings, buffer_before_minutes: Number(e.target.value) })}
-              className="h-12 rounded-xl border-white/10 bg-zinc-900" />
-          </div>
-          <div className="space-y-2">
-            <Label className="text-xs uppercase tracking-[0.2em] text-zinc-400">Buffer sesudah (menit)</Label>
-            <Input data-testid="buffer-after-input" type="number" value={settings.buffer_after_minutes}
-              onChange={(e) => setSettings({ ...settings, buffer_after_minutes: Number(e.target.value) })}
-              className="h-12 rounded-xl border-white/10 bg-zinc-900" />
-          </div>
-          <Button data-testid="save-settings-button" disabled={busy}
-            onClick={() => act(() => api.put("/settings", {
-              buffer_before_minutes: settings.buffer_before_minutes,
-              buffer_after_minutes: settings.buffer_after_minutes,
-            }), "Pengaturan disimpan")}
-            className="h-12 rounded-full bg-[#007AFF] px-8 font-semibold text-white hover:bg-[#0069DB]">
-            Simpan
-          </Button>
-        </TabsContent>
       </Tabs>
     </div>
   );

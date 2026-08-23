@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bookmark, Minus, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Bookmark, Copy, Minus, Pencil, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, errMsg } from "@/api";
 import { useAuth } from "@/context/AuthContext";
@@ -32,7 +32,8 @@ export default function Templates() {
     api.get("/items").then(({ data }) => setItems(data)).catch(() => {});
   }, []);
 
-  const canEdit = (t) => t.owner_id === user?.id || user?.role === "admin";
+  const isOwner = (t) => t.owner_id === user?.id || user?.role === "admin";
+  const canEdit = (t) => isOwner(t) || t.is_shared;
   const grouped = useMemo(() => {
     const g = {};
     (editing?.lines || []).forEach((l) => { (g[l.category || "Lainnya"] = g[l.category || "Lainnya"] || []).push(l); });
@@ -64,14 +65,17 @@ export default function Templates() {
 
   const save = async () => {
     if (!editing.lines.length) return toast.error("Paket harus punya minimal satu alat");
+    if (!editing.name?.trim()) return toast.error("Nama paket wajib diisi");
     setBusy(true);
+    const body = {
+      name: editing.name,
+      is_shared: !!editing.is_shared,
+      lines: editing.lines.map((l) => ({ item_id: l.item_id, qty: l.qty })),
+    };
     try {
-      await api.put(`/templates/${editing.id}`, {
-        name: editing.name,
-        is_shared: editing.is_shared,
-        lines: editing.lines.map((l) => ({ item_id: l.item_id, qty: l.qty })),
-      });
-      toast.success("Paket diperbarui");
+      if (editing.id) await api.put(`/templates/${editing.id}`, body);
+      else await api.post("/templates", body);
+      toast.success(editing.id ? "Paket diperbarui" : "Paket dibuat");
       setEditing(null);
       load();
     } catch (e) {
@@ -93,11 +97,18 @@ export default function Templates() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="font-heading text-4xl font-bold tracking-tighter sm:text-5xl">Template Paket</h1>
-        <p className="mt-4 text-base text-zinc-400">
-          Simpan kombinasi alat favorit, edit kapan saja, dan pakai sekali klik saat booking.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="font-heading text-4xl font-bold tracking-tighter sm:text-5xl">Template Paket</h1>
+          <p className="mt-4 text-base text-zinc-400">
+            Simpan kombinasi alat favorit, edit kapan saja, dan pakai sekali klik saat booking.
+          </p>
+        </div>
+        <Button data-testid="new-template-button"
+          onClick={() => setEditing({ name: "", is_shared: false, lines: [] })}
+          className="h-12 rounded-full bg-[#007AFF] px-6 font-semibold text-white hover:bg-[#0069DB]">
+          <Plus className="mr-2 h-4 w-4" /> Buat Paket Baru
+        </Button>
       </div>
 
       <div data-testid="templates-page-list" className="grid gap-4 md:grid-cols-2">
@@ -115,17 +126,22 @@ export default function Templates() {
                 </p>
               </div>
               <div className="flex gap-2">
+                <button data-testid={`duplicate-template-${t.id}`} title="Duplikat jadi paket saya"
+                  onClick={() => setEditing({ name: `${t.name} (copy)`, is_shared: false, lines: [...t.lines] })}
+                  className="rounded-full p-2 text-zinc-400 hover:bg-white/10 hover:text-white">
+                  <Copy className="h-4 w-4" />
+                </button>
                 {canEdit(t) && (
-                  <>
-                    <button data-testid={`edit-template-${t.id}`} onClick={() => setEditing({ ...t, lines: [...t.lines] })}
-                      className="rounded-full p-2 text-zinc-400 hover:bg-white/10 hover:text-white">
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button data-testid={`delete-template-${t.id}`} onClick={() => hapus(t)}
-                      className="rounded-full p-2 text-zinc-500 hover:bg-white/10 hover:text-rose-400">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </>
+                  <button data-testid={`edit-template-${t.id}`} onClick={() => setEditing({ ...t, lines: [...t.lines] })}
+                    className="rounded-full p-2 text-zinc-400 hover:bg-white/10 hover:text-white">
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                )}
+                {isOwner(t) && (
+                  <button data-testid={`delete-template-${t.id}`} onClick={() => hapus(t)}
+                    className="rounded-full p-2 text-zinc-500 hover:bg-white/10 hover:text-rose-400">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 )}
               </div>
             </div>
@@ -148,7 +164,7 @@ export default function Templates() {
         ))}
         {templates.length === 0 && (
           <p className="text-sm text-zinc-500">
-            Belum ada paket. Tambahkan alat ke keranjang, lalu di halaman Konfirmasi Booking pilih "Simpan paket".
+            Belum ada paket. Klik "Buat Paket Baru" di atas, atau tambahkan alat ke keranjang lalu simpan sebagai paket di halaman Konfirmasi Booking.
           </p>
         )}
       </div>
@@ -156,7 +172,7 @@ export default function Templates() {
       <Dialog open={!!editing} onOpenChange={(v) => !v && setEditing(null)}>
         <DialogContent className="max-h-[85vh] overflow-y-auto border-white/10 bg-zinc-900 text-zinc-100">
           <DialogHeader>
-            <DialogTitle className="font-heading">Edit Paket</DialogTitle>
+            <DialogTitle className="font-heading">{editing?.id ? "Edit Paket" : "Buat Paket Baru"}</DialogTitle>
             <DialogDescription className="text-zinc-500">
               Ubah nama, jumlah tiap alat, tambah atau hapus alat dari paket ini.
             </DialogDescription>
@@ -227,7 +243,7 @@ export default function Templates() {
 
               <Button data-testid="save-template-edit-button" onClick={save} disabled={busy}
                 className="h-12 w-full rounded-full bg-[#007AFF] font-semibold text-white hover:bg-[#0069DB]">
-                Simpan Perubahan
+                {editing.id ? "Simpan Perubahan" : "Simpan Paket"}
               </Button>
             </div>
           )}

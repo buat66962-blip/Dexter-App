@@ -112,7 +112,7 @@ export default function BookingDetail() {
       {b.access && b.status !== "PENDING" ? (
         <div data-testid="access-card" className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-8">
           <p className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-emerald-400">
-            <KeyRound className="h-4 w-4" /> Akses Gudang
+            <KeyRound className="h-4 w-4" /> Akses Storage
           </p>
           <h2 className="mt-4 font-heading text-2xl font-semibold tracking-tight">{b.access.door_name}</h2>
           <p data-testid="access-code-value" className="mt-6 font-mono text-5xl font-bold tracking-[0.2em] text-emerald-400">
@@ -132,11 +132,11 @@ export default function BookingDetail() {
               <DialogTrigger asChild>
                 <Button data-testid="how-to-open-button" variant="outline"
                   className="h-12 rounded-full border-white/10 bg-transparent px-6 text-zinc-200 hover:bg-white/10">
-                  Cara Membuka Gudang
+                  Cara Membuka Storage
                 </Button>
               </DialogTrigger>
               <DialogContent className="border-white/10 bg-zinc-900 text-zinc-100">
-                <DialogHeader><DialogTitle className="font-heading">Cara Membuka Gudang</DialogTitle></DialogHeader>
+                <DialogHeader><DialogTitle className="font-heading">Cara Membuka Storage</DialogTitle></DialogHeader>
                 <ol className="space-y-3 text-sm text-zinc-300">
                   <li>1. Datang ke pintu {b.access.door_name}.</li>
                   <li>2. Sentuh keypad smart lock sampai menyala.</li>
@@ -149,7 +149,7 @@ export default function BookingDetail() {
         </div>
       ) : (
         <div className="rounded-2xl border border-white/10 bg-zinc-900 p-8">
-          <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Akses Gudang</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Akses Storage</p>
           <p className="mt-4 text-base text-zinc-400">Kode akses muncul di sini setelah booking disetujui admin.</p>
         </div>
       )}
@@ -225,7 +225,7 @@ export default function BookingDetail() {
               <h2 className="font-heading text-2xl font-semibold tracking-tight">Checklist Pengembalian</h2>
               <p className="mt-2 text-sm text-zinc-500">
                 {b.checklist_unlocked
-                  ? "Centang setiap alat yang sudah dikembalikan ke gudang."
+                  ? "Centang setiap alat yang sudah dikembalikan ke storage."
                   : `Terbuka pada hari pengembalian (${fmtDate(b.end_time)}).`}
               </p>
             </div>

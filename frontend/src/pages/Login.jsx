@@ -39,14 +39,14 @@ export default function Login() {
           <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#007AFF]">
             <Boxes className="h-5 w-5 text-white" />
           </span>
-          <span className="font-heading text-xl font-bold">Gudang Kantor</span>
+          <span className="font-heading text-xl font-bold">Dexter</span>
         </div>
         <div className="max-w-lg">
           <h1 className="font-heading text-4xl font-bold tracking-tighter sm:text-5xl lg:text-6xl">
             Pinjam barang kantor semudah booking hotel.
           </h1>
           <p className="mt-6 text-base leading-relaxed text-zinc-400">
-            Booking → Admin approve → Kode pintu gudang otomatis dikirim → Ambil barang → Kembalikan.
+            Booking → Admin approve → Kode pintu storage otomatis dikirim → Ambil barang → Kembalikan.
           </p>
         </div>
         <p className="text-xs uppercase tracking-[0.2em] text-zinc-600">Smart Warehouse Access</p>

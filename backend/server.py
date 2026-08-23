@@ -38,7 +38,7 @@ class ItemInput(BaseModel):
     item_code: str
     photo: Optional[str] = None
     condition: str = "BAIK"
-    location: str = "Gudang Utama"
+    location: str = "Storage Utama"
     notes: Optional[str] = None
     status: str = "AVAILABLE"
     quantity: int = 1
@@ -66,6 +66,14 @@ class TemplateInput(BaseModel):
     name: str
     lines: List[BookingLine]
     is_shared: bool = False
+
+
+class CategoryInput(BaseModel):
+    name: str
+
+
+class CategoryRenameInput(BaseModel):
+    new_name: str
 
 
 class HandoverInput(BaseModel):
@@ -436,7 +444,7 @@ async def update_template(template_id: str, payload: TemplateInput, user=Current
     t = await db.templates.find_one({"_id": oid(template_id)})
     if not t:
         raise HTTPException(404, "Template tidak ditemukan")
-    if t["owner_id"] != user["id"] and user["role"] != "admin":
+    if t["owner_id"] != user["id"] and user["role"] != "admin" and not t.get("is_shared"):
         raise HTTPException(403, "Bukan template kamu")
     if not payload.lines:
         raise HTTPException(400, "Template harus punya minimal satu alat")
@@ -470,6 +478,57 @@ async def delete_template(template_id: str, user=CurrentUser):
     if t["owner_id"] != user["id"] and user["role"] != "admin":
         raise HTTPException(403, "Bukan template kamu")
     await db.templates.delete_one({"_id": oid(template_id)})
+    return {"ok": True}
+
+
+@api.get("/categories")
+async def list_categories(user=CurrentUser):
+    counts = {}
+    async for item in db.items.find({}, {"category": 1, "quantity": 1}):
+        cat = item.get("category") or "Lainnya"
+        entry = counts.setdefault(cat, {"name": cat, "item_count": 0, "total_qty": 0})
+        entry["item_count"] += 1
+        entry["total_qty"] += int(item.get("quantity", 1))
+    async for c in db.categories.find():
+        counts.setdefault(c["name"], {"name": c["name"], "item_count": 0, "total_qty": 0})
+    return sorted(counts.values(), key=lambda c: c["name"])
+
+
+@api.post("/categories")
+async def create_category(payload: CategoryInput, admin=AdminUser):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "Nama kategori tidak boleh kosong")
+    if await db.categories.find_one({"name": name}) or await db.items.find_one({"category": name}):
+        raise HTTPException(400, "Kategori sudah ada")
+    await db.categories.insert_one({"name": name, "created_at": now_utc()})
+    await audit("CATEGORY_CREATED", admin["id"], metadata={"name": name})
+    return {"name": name, "item_count": 0, "total_qty": 0}
+
+
+@api.put("/categories/{name}")
+async def rename_category(name: str, payload: CategoryRenameInput, admin=AdminUser):
+    new_name = payload.new_name.strip()
+    if not new_name:
+        raise HTTPException(400, "Nama kategori baru tidak boleh kosong")
+    if new_name != name and (await db.categories.find_one({"name": new_name}) or await db.items.find_one({"category": new_name})):
+        raise HTTPException(400, "Kategori tujuan sudah ada")
+    await db.items.update_many({"category": name}, {"$set": {"category": new_name}})
+    await db.categories.update_one({"name": name}, {"$set": {"name": new_name}}, upsert=True)
+    await db.templates.update_many({"lines.category": name}, {"$set": {"lines.$[el].category": new_name}},
+                                   array_filters=[{"el.category": name}])
+    await db.bookings.update_many({"lines.category": name}, {"$set": {"lines.$[el].category": new_name}},
+                                  array_filters=[{"el.category": name}])
+    await audit("CATEGORY_RENAMED", admin["id"], metadata={"from": name, "to": new_name})
+    return {"name": new_name}
+
+
+@api.delete("/categories/{name}")
+async def delete_category(name: str, admin=AdminUser):
+    if await db.items.count_documents({"category": name}):
+        raise HTTPException(400, "Kategori masih punya alat, pindahkan dulu")
+    await db.categories.delete_one({"name": name})
+    await audit("CATEGORY_DELETED", admin["id"], metadata={"name": name})
     return {"ok": True}
 
 
@@ -795,12 +854,12 @@ async def seed_data():
         await db.items.insert_many([{
             "name": name, "category": cat, "item_code": code, "photo": photo,
             "quantity": qty, "status": "AVAILABLE", "condition": "BAIK",
-            "location": "Gudang Utama", "notes": None, "created_at": now_utc(),
+            "location": "Storage Utama", "notes": None, "created_at": now_utc(),
         } for cat, name, code, qty, photo in SEED_ITEMS])
         await db.settings.update_one({"key": "global"}, {"$set": {"catalog_version": 2}}, upsert=True)
     if await db.doors.count_documents({}) == 0:
         await db.doors.insert_one({
-            "name": "Gudang Utama", "provider": "bardi", "device_id": env("TUYA_DEVICE_ID", "demo-device"),
+            "name": "Storage Utama", "provider": "bardi", "device_id": env("TUYA_DEVICE_ID", "demo-device"),
             "location": "Lantai 1", "status": "ONLINE",
         })
     await svc.get_settings()

@@ -10,7 +10,6 @@ import Checkout from "@/pages/Checkout";
 import ItemDetail from "@/pages/ItemDetail";
 import MyBookings from "@/pages/MyBookings";
 import BookingDetail from "@/pages/BookingDetail";
-import Notifications from "@/pages/Notifications";
 import Admin from "@/pages/Admin";
 import "@/App.css";
 
@@ -33,7 +32,6 @@ function Shell() {
       <Route path="/barang/:id" element={<Protected><ItemDetail /></Protected>} />
       <Route path="/peminjaman" element={<Protected><MyBookings /></Protected>} />
       <Route path="/peminjaman/:id" element={<Protected><BookingDetail /></Protected>} />
-      <Route path="/notifikasi" element={<Protected><Notifications /></Protected>} />
       <Route path="/admin" element={<Protected adminOnly><Admin /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

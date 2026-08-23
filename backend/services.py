@@ -193,7 +193,7 @@ async def booking_detail(booking: dict) -> dict:
     cred = await db.access_credentials.find_one({"booking_id": str(booking["_id"]), "status": {"$ne": "REVOKED"}}, sort=[("_id", -1)])
     if cred:
         door = await db.doors.find_one({"_id": oid(cred["door_id"])})
-        data["access"] = {**ser(cred), "door_name": door["name"] if door else "Gudang"}
+        data["access"] = {**ser(cred), "door_name": door["name"] if door else "Storage"}
     else:
         data["access"] = None
     evt = await db.calendar_events.find_one({"booking_id": str(booking["_id"])})
@@ -210,7 +210,7 @@ async def generate_access(booking: dict) -> dict:
     door = await db.doors.find_one({"status": {"$ne": "DISABLED"}})
     if not door:
         door_id = (await db.doors.insert_one({
-            "name": "Gudang Utama", "provider": "bardi", "device_id": "demo-device", "location": "Lantai 1", "status": "ONLINE",
+            "name": "Storage Utama", "provider": "bardi", "device_id": "demo-device", "location": "Lantai 1", "status": "ONLINE",
         })).inserted_id
         door = await db.doors.find_one({"_id": door_id})
     start = parse_dt(booking["start_time"]) - timedelta(minutes=settings["buffer_before_minutes"])
@@ -247,7 +247,7 @@ async def generate_access(booking: dict) -> dict:
     })
     await audit("ACCESS_GENERATED" if result.ok else "ACCESS_FAILED", booking["user_id"], str(booking["_id"]), {"door": door["name"]})
     if not result.ok:
-        await notify_admin("ACCESS_FAILED", f"⚠️ <b>GAGAL BUAT AKSES PINTU</b>\nBooking #{booking.get('code')}\nError: {result.error}", str(booking["_id"]))
+        await notify_admin("ACCESS_FAILED", f"⚠️ <b>GAGAL BUAT AKSES PINTU STORAGE</b>\nBooking #{booking.get('code')}\nError: {result.error}", str(booking["_id"]))
     return ser(cred)
 
 
@@ -273,7 +273,7 @@ async def sync_calendar(booking: dict, items: List[dict]) -> dict:
     description = (
         f"Peminjam:\n{booking.get('user_name')}\n\nAcara:\n{booking.get('purpose')}\n\n"
         f"Lokasi:\n{booking.get('location') or '-'}\n\nAlat:\n{item_names}\n\n"
-        f"Order ID:\n#{booking.get('code')}\n\nGudang:\nGudang Utama\n\nStatus:\nApproved"
+        f"Order ID:\n#{booking.get('code')}\n\nStorage:\nStorage Utama\n\nStatus:\nApproved"
     )
     result = calendar.create_event(summary, description, parse_dt(booking["start_time"]), parse_dt(booking["end_time"]))
     doc = {
