@@ -12,10 +12,11 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 
+const TZ = { timeZone: "Asia/Jakarta" };
 const fmt = (iso) =>
-  new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
-const fmtTime = (iso) => new Date(iso).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
-const fmtDate = (iso) => new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+  new Date(iso).toLocaleString("id-ID", { ...TZ, day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const fmtTime = (iso) => new Date(iso).toLocaleTimeString("id-ID", { ...TZ, hour: "2-digit", minute: "2-digit" });
+const fmtDate = (iso) => new Date(iso).toLocaleDateString("id-ID", { ...TZ, day: "2-digit", month: "long", year: "numeric" });
 
 const CONDITIONS = [
   { key: "BAIK", label: "🟢 Kondisi baik" },
@@ -62,8 +63,8 @@ export default function BookingDetail() {
     line(`No. Invoice: INV-${b.code}`);
     y += 3;
     line(`Nama: ${b.user_name}`);
-    line(`Tanggal Pengambilan: ${fmtDate(b.start_time)}`);
-    line(`Tanggal Pengembalian: ${fmtDate(b.end_time)}`);
+    line(`Tanggal Pengambilan: ${fmt(b.start_time)}`);
+    line(`Tanggal Pengembalian: ${fmt(b.end_time)}`);
     line(`Durasi: ${b.pickup_date === b.return_date ? "Hari yang sama" : `${b.duration_days || Math.max(1, Math.round((b.duration_hours || 24) / 24))} hari`}`);
     line(`Acara: ${b.purpose}`);
     line(`Lokasi: ${b.location || "-"}`);
@@ -74,11 +75,12 @@ export default function BookingDetail() {
       list.forEach((l) => line(`   ${l.name} (${l.qty} pcs) - ${l.item_code}`));
     });
     y += 3;
-    if (b.access) {
-      line("AKSES GUDANG", 13, true);
-      line(`Pintu: ${b.access.door_name}`);
-      line(`Kode: ${b.access.code}`);
-      line(`Valid: ${fmtTime(b.access.valid_from)} - ${fmtTime(b.access.valid_until)}`);
+    if (b.access_codes?.length) {
+      line("AKSES STORAGE", 13, true);
+      b.access_codes.forEach((ac) => {
+        line(`${ac.kind === "RETURN" ? "Pengembalian" : "Pengambilan"} (${ac.door_name}): ${ac.released ? ac.code : "dikirim 1 jam sebelum jadwal"}`);
+        line(`   Jadwal: ${fmt(ac.schedule_at)}`);
+      });
     }
     line(`Status: ${b.status}`, 11, true);
     doc.save(`invoice-${b.code}.pdf`);
@@ -103,54 +105,57 @@ export default function BookingDetail() {
             {b.purpose}
           </h1>
           <p className="mt-3 text-sm text-zinc-400">
-            Ambil {fmtDate(b.start_time)} · kembali {fmtDate(b.end_time)} · {b.total_qty} pcs
+            Ambil {fmt(b.start_time)} · kembali {fmt(b.end_time)} · {b.total_qty} pcs
           </p>
         </div>
         <StatusBadge status={b.status} testId="booking-detail-status" />
       </div>
 
-      {b.access && b.status !== "PENDING" ? (
-        <div data-testid="access-card" className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-8">
-          <p className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-emerald-400">
-            <KeyRound className="h-4 w-4" /> Akses Storage
-          </p>
-          <h2 className="mt-4 font-heading text-2xl font-semibold tracking-tight">{b.access.door_name}</h2>
-          <p data-testid="access-code-value" className="mt-6 font-mono text-5xl font-bold tracking-[0.2em] text-emerald-400">
-            {b.access.code}
-          </p>
-          <p className="mt-4 text-sm text-zinc-400">
-            Berlaku {fmtTime(b.access.valid_from)} – {fmtTime(b.access.valid_until)}
-          </p>
-          <div className="mt-3"><StatusBadge status={b.access.status} testId="access-status" /></div>
-          <div className="mt-6 flex flex-wrap gap-3">
-            <Button data-testid="copy-access-code-button"
-              onClick={() => { navigator.clipboard?.writeText(b.access.code); toast.success("Kode disalin"); }}
-              className="h-12 rounded-full bg-emerald-500 px-6 font-semibold text-black hover:bg-emerald-400">
-              <Copy className="mr-2 h-4 w-4" /> Copy Code
-            </Button>
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button data-testid="how-to-open-button" variant="outline"
-                  className="h-12 rounded-full border-white/10 bg-transparent px-6 text-zinc-200 hover:bg-white/10">
-                  Cara Membuka Storage
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="border-white/10 bg-zinc-900 text-zinc-100">
-                <DialogHeader><DialogTitle className="font-heading">Cara Membuka Storage</DialogTitle></DialogHeader>
-                <ol className="space-y-3 text-sm text-zinc-300">
-                  <li>1. Datang ke pintu {b.access.door_name}.</li>
-                  <li>2. Sentuh keypad smart lock sampai menyala.</li>
-                  <li>3. Masukkan kode {b.access.code} lalu tekan tombol pagar (#).</li>
-                  <li>4. Pintu terbuka. Kode hanya aktif pada rentang waktu bookingmu.</li>
-                </ol>
-              </DialogContent>
-            </Dialog>
-          </div>
+      {(b.access_codes?.length ? b.access_codes : []).length > 0 && b.status !== "PENDING" ? (
+        <div className="grid gap-6 lg:grid-cols-2">
+          {b.access_codes.map((ac) => {
+            const label = ac.kind === "RETURN" ? "Pengembalian" : "Pengambilan";
+            return (
+              <div key={ac.id} data-testid={`access-card-${ac.kind.toLowerCase()}`}
+                className={`rounded-2xl border p-8 ${ac.released ? "border-emerald-500/30 bg-emerald-500/5" : "border-white/10 bg-zinc-900"}`}>
+                <p className={`flex items-center gap-2 text-xs uppercase tracking-[0.2em] ${ac.released ? "text-emerald-400" : "text-zinc-500"}`}>
+                  {ac.released ? <KeyRound className="h-4 w-4" /> : <Lock className="h-4 w-4" />} Kode {label}
+                </p>
+                <h2 className="mt-4 font-heading text-xl font-semibold tracking-tight">{ac.door_name}</h2>
+                {ac.released ? (
+                  <>
+                    <p data-testid={`access-code-${ac.kind.toLowerCase()}`}
+                      className="mt-6 font-mono text-4xl font-bold tracking-[0.2em] text-emerald-400 sm:text-5xl">
+                      {ac.code}
+                    </p>
+                    <p className="mt-4 text-sm text-zinc-400">
+                      Berlaku {fmt(ac.valid_from)} – {fmtTime(ac.valid_until)}
+                    </p>
+                    <Button data-testid={`copy-access-code-${ac.kind.toLowerCase()}`}
+                      onClick={() => { navigator.clipboard?.writeText(ac.code); toast.success("Kode disalin"); }}
+                      className="mt-6 h-12 rounded-full bg-emerald-500 px-6 font-semibold text-black hover:bg-emerald-400">
+                      <Copy className="mr-2 h-4 w-4" /> Copy Code
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <p className="mt-6 font-mono text-4xl font-bold tracking-[0.3em] text-zinc-600 sm:text-5xl">• • • •</p>
+                    <p data-testid={`access-locked-${ac.kind.toLowerCase()}`} className="mt-4 text-sm text-zinc-400">
+                      Kode muncul otomatis 1 jam sebelum jadwal {label.toLowerCase()} ({fmt(ac.schedule_at)}),
+                      yaitu sekitar {fmt(ac.release_at)}.
+                    </p>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="rounded-2xl border border-white/10 bg-zinc-900 p-8">
           <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Akses Storage</p>
-          <p className="mt-4 text-base text-zinc-400">Kode akses muncul di sini setelah booking disetujui admin.</p>
+          <p className="mt-4 text-base text-zinc-400">
+            Kode pintu (ambil &amp; kembali, berbeda) dibuat setelah booking disetujui admin, lalu dikirim 1 jam sebelum tiap jadwal.
+          </p>
         </div>
       )}
 
@@ -168,8 +173,8 @@ export default function BookingDetail() {
 
         <dl className="mt-8 grid gap-6 sm:grid-cols-2">
           <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Nama</dt><dd className="mt-2">{b.user_name}</dd></div>
-          <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Tanggal Pengambilan</dt><dd className="mt-2">{fmtDate(b.start_time)}</dd></div>
-          <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Tanggal Pengembalian</dt><dd className="mt-2">{fmtDate(b.end_time)}</dd></div>
+          <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Pengambilan</dt><dd className="mt-2">{fmt(b.start_time)}</dd></div>
+          <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Pengembalian</dt><dd className="mt-2">{fmt(b.end_time)}</dd></div>
           <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Durasi Peminjaman</dt>
             <dd className="mt-2">
               {b.pickup_date && b.return_date && b.pickup_date === b.return_date

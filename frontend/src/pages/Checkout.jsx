@@ -19,7 +19,7 @@ export default function Checkout() {
   const { lines, setQty, clear, totalQty } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ pickup_date: "", return_date: "", purpose: "", location: "" });
+  const [form, setForm] = useState({ pickup_date: "", return_date: "", pickup_time: "08:00", return_time: "17:00", purpose: "", location: "" });
   const [stock, setStock] = useState({});
   const [saving, setSaving] = useState(false);
   const [templateName, setTemplateName] = useState("");
@@ -36,20 +36,23 @@ export default function Checkout() {
     if (!form.pickup_date || !form.return_date) { setStock({}); return; }
     api.get("/items", {
       params: {
-        start_time: `${form.pickup_date}T08:00:00+07:00`,
-        end_time: `${form.return_date}T17:00:00+07:00`,
+        start_time: `${form.pickup_date}T${form.pickup_time}:00+07:00`,
+        end_time: `${form.return_date}T${form.return_time}:00+07:00`,
       },
     }).then(({ data }) => {
       const map = {};
       data.forEach((i) => { map[i.id] = i.available_qty; });
       setStock(map);
     }).catch(() => {});
-  }, [form.pickup_date, form.return_date]);
+  }, [form.pickup_date, form.return_date, form.pickup_time, form.return_time]);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!form.pickup_date) return toast.error("Pilih tanggal pengambilan");
     if (!form.return_date) return toast.error("Pilih tanggal pengembalian");
+    if (!form.pickup_time || !form.return_time) return toast.error("Pilih jam pengambilan dan pengembalian");
+    if (new Date(`${form.return_date}T${form.return_time}`) <= new Date(`${form.pickup_date}T${form.pickup_time}`))
+      return toast.error("Waktu pengembalian harus setelah waktu pengambilan");
     if (!lines.length) return toast.error("Keranjang kosong");
     setSaving(true);
     try {
@@ -57,6 +60,8 @@ export default function Checkout() {
         lines: lines.map((l) => ({ item_id: l.item_id, qty: l.qty })),
         pickup_date: form.pickup_date,
         return_date: form.return_date,
+        pickup_time: form.pickup_time,
+        return_time: form.return_time,
         purpose: form.purpose,
         location: form.location,
       });
@@ -96,7 +101,7 @@ export default function Checkout() {
 
       <div>
         <h1 className="font-heading text-4xl font-bold tracking-tighter sm:text-5xl">Konfirmasi Booking</h1>
-        <p className="mt-4 text-base text-zinc-400">Tentukan tanggal pengambilan dan pengembalian, lalu kirim booking.</p>
+        <p className="mt-4 text-base text-zinc-400">Tentukan tanggal &amp; jam pengambilan dan pengembalian, lalu kirim booking.</p>
       </div>
 
       <div className="grid gap-8 lg:grid-cols-[1fr_1.1fr]">
@@ -126,12 +131,24 @@ export default function Checkout() {
                 onChange={(e) => setForm({ ...form, return_date: e.target.value })}
                 className="h-12 rounded-xl border-white/10 bg-zinc-950 text-base" />
             </div>
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-[0.2em] text-zinc-400">Jam Pengambilan</Label>
+              <Input data-testid="checkout-time-input" type="time" value={form.pickup_time}
+                onChange={(e) => setForm({ ...form, pickup_time: e.target.value })}
+                className="h-12 rounded-xl border-white/10 bg-zinc-950 text-base" />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-[0.2em] text-zinc-400">Jam Pengembalian</Label>
+              <Input data-testid="checkout-return-time-input" type="time" value={form.return_time}
+                onChange={(e) => setForm({ ...form, return_time: e.target.value })}
+                className="h-12 rounded-xl border-white/10 bg-zinc-950 text-base" />
+            </div>
           </div>
 
           <p data-testid="return-date-preview" className="text-sm text-zinc-500">
             {dateSet
-              ? `Ambil ${form.pickup_date} · kembali ${form.return_date} — checklist pengembalian terbuka pada tanggal pengembalian`
-              : "Pilih kedua tanggal untuk melihat sisa stok."}
+              ? `Ambil ${form.pickup_date} ${form.pickup_time} · kembali ${form.return_date} ${form.return_time} — kode pintu ambil & kembali berbeda, masing-masing dikirim 1 jam sebelum jadwal`
+              : "Pilih tanggal & jam untuk melihat sisa stok."}
           </p>
 
           <div className="space-y-2">

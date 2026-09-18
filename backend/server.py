@@ -53,6 +53,8 @@ class BookingInput(BaseModel):
     lines: List[BookingLine]
     pickup_date: str
     return_date: str
+    pickup_time: str = "08:00"
+    return_time: str = "17:00"
     purpose: str
     location: Optional[str] = ""
 
@@ -208,15 +210,15 @@ async def create_booking(payload: BookingInput, user=CurrentUser):
     if not payload.lines:
         raise HTTPException(400, "Keranjang masih kosong")
     try:
-        start = svc.parse_dt(f"{payload.pickup_date}T08:00:00+07:00")
+        start = svc.parse_dt(f"{payload.pickup_date}T{payload.pickup_time}:00+07:00")
     except ValueError:
-        raise HTTPException(400, "Tanggal pengambilan tidak valid")
+        raise HTTPException(400, "Tanggal/jam pengambilan tidak valid")
     try:
-        end = svc.parse_dt(f"{payload.return_date}T17:00:00+07:00")
+        end = svc.parse_dt(f"{payload.return_date}T{payload.return_time}:00+07:00")
     except ValueError:
-        raise HTTPException(400, "Tanggal pengembalian tidak valid")
+        raise HTTPException(400, "Tanggal/jam pengembalian tidak valid")
     if end <= start:
-        raise HTTPException(400, "Tanggal pengembalian tidak boleh sebelum tanggal pengambilan")
+        raise HTTPException(400, "Waktu pengembalian harus setelah waktu pengambilan")
     duration_hours = int((end - start).total_seconds() // 3600)
 
     lines = []
@@ -248,6 +250,8 @@ async def create_booking(payload: BookingInput, user=CurrentUser):
         "end_time": end,
         "pickup_date": payload.pickup_date,
         "return_date": payload.return_date,
+        "pickup_time": payload.pickup_time,
+        "return_time": payload.return_time,
         "duration_days": max(1, round(duration_hours / 24) or 1),
         "duration_hours": duration_hours,
         "purpose": payload.purpose,
@@ -271,7 +275,7 @@ async def create_booking(payload: BookingInput, user=CurrentUser):
     durasi = "hari yang sama" if payload.pickup_date == payload.return_date else f"{doc['duration_days']} hari"
     await svc.notify_admin("BOOKING_CREATED", (
         f"🔔 <b>BOOKING BARU</b>\n\n👤 {user['name']}\n"
-        f"📅 Ambil: {payload.pickup_date}\n↩️ Kembali: {payload.return_date} ({durasi})\n"
+        f"📅 Ambil: {payload.pickup_date} {payload.pickup_time}\n↩️ Kembali: {payload.return_date} {payload.return_time} ({durasi})\n"
         f"🎬 Acara: {payload.purpose}\n📍 Lokasi: {payload.location or '-'}\n\n{item_text}"
     ), bid, buttons=[[
         {"text": "✅ APPROVE", "callback_data": f"approve:{bid}"},
@@ -302,6 +306,7 @@ async def get_booking(booking_id: str, user=CurrentUser):
     data = await svc.booking_detail(b)
     if b["status"] == svc.STATUS_PENDING and data.get("access"):
         data["access"] = None
+        data["access_codes"] = []
     return data
 
 

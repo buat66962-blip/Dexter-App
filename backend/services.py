@@ -17,6 +17,8 @@ STATUS_REJECTED = "REJECTED"
 STATUS_CANCELLED = "CANCELLED"
 STATUS_OVERDUE = "OVERDUE"
 
+ACCESS_RELEASE_MINUTES = 60  # kode dikirim & tampil 1 jam sebelum jadwal
+
 BLOCKING_STATUSES = [STATUS_PENDING, STATUS_APPROVED, STATUS_ACTIVE, STATUS_RETURN_REQUESTED, STATUS_OVERDUE]
 
 
@@ -171,6 +173,32 @@ async def toggle_checklist(booking: dict, item_id: str, checked: bool) -> dict:
     return await booking_detail(booking)
 
 
+async def access_codes_for(booking: dict) -> List[dict]:
+    """Kode akses pintu, hanya dibuka 1 jam sebelum jadwalnya masing-masing."""
+    out = []
+    now = now_utc()
+    cursor = db.access_credentials.find({"booking_id": str(booking["_id"]), "status": {"$ne": "REVOKED"}}).sort("schedule_at", 1)
+    async for cred in cursor:
+        door = await db.doors.find_one({"_id": oid(cred["door_id"])})
+        schedule = parse_dt(cred["schedule_at"]) if cred.get("schedule_at") else parse_dt(booking["start_time"])
+        release = parse_dt(cred["release_at"]) if cred.get("release_at") else schedule - timedelta(minutes=ACCESS_RELEASE_MINUTES)
+        released = now >= release
+        out.append({
+            "id": str(cred["_id"]),
+            "kind": cred.get("kind", "PICKUP"),
+            "door_name": door["name"] if door else "Storage",
+            "code": cred["code"] if released else None,
+            "released": released,
+            "release_at": release.isoformat(),
+            "schedule_at": schedule.isoformat(),
+            "valid_from": parse_dt(cred["valid_from"]).isoformat(),
+            "valid_until": parse_dt(cred["valid_until"]).isoformat(),
+            "status": cred["status"],
+            "simulated": cred.get("simulated", False),
+        })
+    return out
+
+
 async def booking_detail(booking: dict) -> dict:
     data = ser(booking)
     lines, items = [], []
@@ -196,6 +224,7 @@ async def booking_detail(booking: dict) -> dict:
         data["access"] = {**ser(cred), "door_name": door["name"] if door else "Storage"}
     else:
         data["access"] = None
+    data["access_codes"] = await access_codes_for(booking)
     evt = await db.calendar_events.find_one({"booking_id": str(booking["_id"])})
     data["calendar"] = ser(evt)
     return data
@@ -205,25 +234,21 @@ async def _set_items_status(item_ids: List[str], status: str):
     await db.items.update_many({"_id": {"$in": [oid(i) for i in item_ids]}}, {"$set": {"status": status}})
 
 
-async def generate_access(booking: dict) -> dict:
-    settings = await get_settings()
-    door = await db.doors.find_one({"status": {"$ne": "DISABLED"}})
-    if not door:
-        door_id = (await db.doors.insert_one({
-            "name": "Storage Utama", "provider": "bardi", "device_id": "demo-device", "location": "Lantai 1", "status": "ONLINE",
-        })).inserted_id
-        door = await db.doors.find_one({"_id": door_id})
-    start = parse_dt(booking["start_time"]) - timedelta(minutes=settings["buffer_before_minutes"])
-    end = parse_dt(booking["end_time"]) + timedelta(minutes=settings["buffer_after_minutes"])
+async def _create_credential(booking: dict, door: dict, kind: str, schedule: datetime,
+                             valid_from: datetime, valid_until: datetime) -> dict:
     code = generate_code()
     provider = get_door_provider(door.get("provider", ""))
-    result = provider.create_code(ser(door), code, start, end)
+    result = provider.create_code(ser(door), code, valid_from, valid_until)
     cred = {
         "booking_id": str(booking["_id"]),
         "door_id": str(door["_id"]),
+        "kind": kind,  # PICKUP | RETURN
         "code": code,
-        "valid_from": start,
-        "valid_until": end,
+        "schedule_at": schedule,
+        "release_at": schedule - timedelta(minutes=ACCESS_RELEASE_MINUTES),
+        "released_notified": False,
+        "valid_from": valid_from,
+        "valid_until": valid_until,
         "status": "ACTIVE" if result.ok else "FAILED",
         "provider": provider.name,
         "provider_code_id": result.data.get("provider_code_id"),
@@ -240,15 +265,40 @@ async def generate_access(booking: dict) -> dict:
         "user_id": booking["user_id"],
         "user_name": booking.get("user_name"),
         "credential_id": str(res.inserted_id),
-        "event": "ACCESS_GENERATED" if result.ok else "ACCESS_FAILED",
+        "event": f"ACCESS_GENERATED_{kind}" if result.ok else "ACCESS_FAILED",
         "status": "SUCCESS" if result.ok else "FAILED",
         "error_message": result.error,
         "created_at": now_utc(),
     })
-    await audit("ACCESS_GENERATED" if result.ok else "ACCESS_FAILED", booking["user_id"], str(booking["_id"]), {"door": door["name"]})
     if not result.ok:
-        await notify_admin("ACCESS_FAILED", f"⚠️ <b>GAGAL BUAT AKSES PINTU STORAGE</b>\nBooking #{booking.get('code')}\nError: {result.error}", str(booking["_id"]))
+        await notify_admin("ACCESS_FAILED", (
+            f"⚠️ <b>GAGAL BUAT AKSES PINTU STORAGE ({kind})</b>\nBooking #{booking.get('code')}\nError: {result.error}"
+        ), str(booking["_id"]))
     return ser(cred)
+
+
+async def generate_access(booking: dict) -> List[dict]:
+    """Dua kode berbeda: satu untuk pengambilan, satu untuk pengembalian."""
+    settings = await get_settings()
+    door = await db.doors.find_one({"status": {"$ne": "DISABLED"}})
+    if not door:
+        door_id = (await db.doors.insert_one({
+            "name": "Storage Utama", "provider": "bardi", "device_id": "demo-device", "location": "Lantai 1", "status": "ONLINE",
+        })).inserted_id
+        door = await db.doors.find_one({"_id": door_id})
+    start, end = parse_dt(booking["start_time"]), parse_dt(booking["end_time"])
+    before = timedelta(minutes=settings["buffer_before_minutes"])
+    after = timedelta(minutes=settings["buffer_after_minutes"])
+    creds = [
+        await _create_credential(booking, door, "PICKUP", start,
+                                 start - timedelta(minutes=ACCESS_RELEASE_MINUTES) - before,
+                                 min(start + timedelta(hours=3), end) + after),
+        await _create_credential(booking, door, "RETURN", end,
+                                 end - timedelta(minutes=ACCESS_RELEASE_MINUTES) - before,
+                                 end + timedelta(hours=3) + after),
+    ]
+    await audit("ACCESS_GENERATED", booking["user_id"], str(booking["_id"]), {"door": door["name"], "codes": 2})
+    return creds
 
 
 async def revoke_access(booking_id: str):
@@ -308,18 +358,20 @@ async def approve_booking(booking: dict, admin_name: str) -> dict:
     }})
     booking = await db.bookings.find_one({"_id": booking["_id"]})
     await sync_calendar(booking, [])
-    cred = await generate_access(booking)
+    creds = await generate_access(booking)
     await db.bookings.update_one({"_id": booking["_id"]}, {"$set": {"checklist": build_checklist(booking.get("lines", []))}})
     user = await db.users.find_one({"_id": oid(booking["user_id"])})
     await audit("BOOKING_APPROVED", booking["user_id"], bid, {"admin": admin_name})
     if user:
         await notify_user(ser(user), "BOOKING_APPROVED", (
-            f"✅ Booking #{booking['code']} disetujui.\nKode akses gudang: {cred['code']}\n"
-            f"Berlaku {fmt(parse_dt(cred['valid_from']))} - {fmt(parse_dt(cred['valid_until']))}"
+            f"✅ Booking #{booking['code']} disetujui.\n"
+            f"🔐 Kode pintu pengambilan dikirim otomatis 1 jam sebelum {fmt(start)}.\n"
+            f"🔐 Kode pintu pengembalian (berbeda) dikirim 1 jam sebelum {fmt(end)}."
         ), bid)
     await notify_admin("BOOKING_APPROVED", (
         f"✅ <b>BOOKING DISETUJUI</b>\nBooking #{booking['code']}\n👤 {booking['user_name']}\n"
-        f"🔐 Kode akses: {cred['code']}"
+        f"🔐 Kode ambil: {creds[0]['code']} (rilis 1 jam sebelum {fmt(start)})\n"
+        f"🔐 Kode kembali: {creds[1]['code']} (rilis 1 jam sebelum {fmt(end)})"
     ), bid)
     return await booking_detail(booking)
 
@@ -372,7 +424,7 @@ async def extend_booking(booking: dict, minutes: int, actor: str) -> dict:
     }})
     booking = await db.bookings.find_one({"_id": booking["_id"]})
     await revoke_access(bid)
-    cred = await generate_access(booking)
+    creds = await generate_access(booking)
     evt = await db.calendar_events.find_one({"booking_id": bid})
     if evt and evt.get("google_event_id"):
         calendar.update_event(evt["google_event_id"], parse_dt(booking["start_time"]), new_end, f"Extended by {actor}")
@@ -380,8 +432,10 @@ async def extend_booking(booking: dict, minutes: int, actor: str) -> dict:
     user = await db.users.find_one({"_id": oid(booking["user_id"])})
     if user:
         await notify_user(ser(user), "BOOKING_EXTENDED", (
-            f"⏱️ Booking #{booking['code']} diperpanjang sampai {fmt(new_end)}.\nKode akses baru: {cred['code']}"
+            f"⏱️ Booking #{booking['code']} diperpanjang sampai {fmt(new_end)}.\n"
+            f"Kode pintu pengembalian baru dikirim 1 jam sebelum jadwal."
         ), bid)
+    logger.info("extend booking %s -> %s codes", bid, len(creds))
     return await booking_detail(booking)
 
 
@@ -492,8 +546,34 @@ async def report_csv_rows(days: int = 30):
 
 
 # ------------------------------------------------------------------------ schedule
+async def release_due_access_codes():
+    """Kirim kode pintu 1 jam sebelum jadwal ambil / kembali."""
+    now = now_utc()
+    cursor = db.access_credentials.find({
+        "status": "ACTIVE", "released_notified": {"$ne": True}, "release_at": {"$lte": now},
+    })
+    async for cred in cursor:
+        booking = await db.bookings.find_one({"_id": oid(cred["booking_id"])})
+        if not booking or booking["status"] in (STATUS_CANCELLED, STATUS_REJECTED, STATUS_RETURNED):
+            await db.access_credentials.update_one({"_id": cred["_id"]}, {"$set": {"released_notified": True}})
+            continue
+        kind = cred.get("kind", "PICKUP")
+        label = "PENGAMBILAN" if kind == "PICKUP" else "PENGEMBALIAN"
+        schedule = parse_dt(cred["schedule_at"]) if cred.get("schedule_at") else parse_dt(booking["start_time"])
+        user = await db.users.find_one({"_id": oid(booking["user_id"])})
+        if user:
+            await notify_user(ser(user), f"ACCESS_{kind}", (
+                f"🔐 Kode pintu {label} booking #{booking['code']}: <b>{cred['code']}</b>\n"
+                f"Jadwal {label.lower()}: {fmt(schedule)}\n"
+                f"Berlaku {fmt(parse_dt(cred['valid_from']))} - {fmt(parse_dt(cred['valid_until']))}"
+            ), str(booking["_id"]))
+        await db.access_credentials.update_one({"_id": cred["_id"]}, {"$set": {"released_notified": True}})
+        await audit(f"ACCESS_RELEASED_{kind}", booking["user_id"], str(booking["_id"]))
+
+
 async def run_scheduler_once():
     now = now_utc()
+    await release_due_access_codes()
     # activate started bookings
     async for b in db.bookings.find({"status": STATUS_APPROVED, "start_time": {"$lte": now}}):
         await db.bookings.update_one({"_id": b["_id"]}, {"$set": {"status": STATUS_ACTIVE}})
