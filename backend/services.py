@@ -322,7 +322,7 @@ async def sync_calendar(booking: dict, items: List[dict]) -> dict:
     summary = f"[PINJAM] {first}{extra} — {booking.get('user_name')}"
     description = (
         f"Peminjam:\n{booking.get('user_name')}\n\nAcara:\n{booking.get('purpose')}\n\n"
-        f"Lokasi:\n{booking.get('location') or '-'}\n\nAlat:\n{item_names}\n\n"
+        f"Alat:\n{item_names}\n\n"
         f"Order ID:\n#{booking.get('code')}\n\nStorage:\nStorage Utama\n\nStatus:\nApproved"
     )
     result = calendar.create_event(summary, description, parse_dt(booking["start_time"]), parse_dt(booking["end_time"]))

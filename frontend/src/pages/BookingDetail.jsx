@@ -67,9 +67,8 @@ export default function BookingDetail() {
     line(`Tanggal Pengembalian: ${fmt(b.end_time)}`);
     line(`Durasi: ${b.pickup_date === b.return_date ? "Hari yang sama" : `${b.duration_days || Math.max(1, Math.round((b.duration_hours || 24) / 24))} hari`}`);
     line(`Acara: ${b.purpose}`);
-    line(`Lokasi: ${b.location || "-"}`);
     y += 3;
-    line("LIST ALAT", 13, true);
+    line("LIST PEMINJAMAN", 13, true);
     Object.entries(grouped).forEach(([cat, list]) => {
       line(cat, 11, true);
       list.forEach((l) => line(`   ${l.name} (${l.qty} pcs) - ${l.item_code}`));
@@ -183,12 +182,11 @@ export default function BookingDetail() {
             </dd>
           </div>
           <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Acara</dt><dd className="mt-2">{b.purpose}</dd></div>
-          <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Lokasi</dt><dd className="mt-2">{b.location || "-"}</dd></div>
           <div><dt className="text-xs uppercase tracking-[0.2em] text-zinc-500">Total Alat</dt><dd className="mt-2">{b.total_qty} pcs</dd></div>
         </dl>
 
         <div className="mt-8 space-y-6">
-          <p className="text-xs uppercase tracking-[0.2em] text-zinc-400">List Alat</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-zinc-400">List Peminjaman</p>
           {Object.entries(grouped).map(([cat, list]) => (
             <div key={cat} data-testid={`invoice-group-${cat.toLowerCase().replace(/[^a-z0-9]/g, "-")}`} className="space-y-2">
               <p className="font-heading text-base font-semibold text-zinc-200">{cat}</p>

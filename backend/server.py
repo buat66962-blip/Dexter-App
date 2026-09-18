@@ -276,7 +276,7 @@ async def create_booking(payload: BookingInput, user=CurrentUser):
     await svc.notify_admin("BOOKING_CREATED", (
         f"🔔 <b>BOOKING BARU</b>\n\n👤 {user['name']}\n"
         f"📅 Ambil: {payload.pickup_date} {payload.pickup_time}\n↩️ Kembali: {payload.return_date} {payload.return_time} ({durasi})\n"
-        f"🎬 Acara: {payload.purpose}\n📍 Lokasi: {payload.location or '-'}\n\n{item_text}"
+        f"🎬 Acara: {payload.purpose}\n\n{item_text}"
     ), bid, buttons=[[
         {"text": "✅ APPROVE", "callback_data": f"approve:{bid}"},
         {"text": "❌ REJECT", "callback_data": f"reject:{bid}"},

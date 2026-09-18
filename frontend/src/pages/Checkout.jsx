@@ -8,7 +8,6 @@ import { useCart } from "@/context/CartContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
@@ -19,7 +18,7 @@ export default function Checkout() {
   const { lines, setQty, clear, totalQty } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ pickup_date: "", return_date: "", pickup_time: "08:00", return_time: "17:00", purpose: "", location: "" });
+  const [form, setForm] = useState({ pickup_date: "", return_date: "", pickup_time: "08:00", return_time: "17:00", purpose: "" });
   const [stock, setStock] = useState({});
   const [saving, setSaving] = useState(false);
   const [templateName, setTemplateName] = useState("");
@@ -63,7 +62,6 @@ export default function Checkout() {
         pickup_time: form.pickup_time,
         return_time: form.return_time,
         purpose: form.purpose,
-        location: form.location,
       });
       clear();
       toast.success("Booking dibuat, menunggu approval admin");
@@ -159,14 +157,6 @@ export default function Checkout() {
               className="h-12 rounded-xl border-white/10 bg-zinc-950 text-base" />
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-xs uppercase tracking-[0.2em] text-zinc-400">Lokasi</Label>
-            <Textarea data-testid="checkout-location-input" value={form.location}
-              onChange={(e) => setForm({ ...form, location: e.target.value })}
-              placeholder="Studio YN, Gedung A lantai 3…"
-              className="min-h-20 rounded-xl border-white/10 bg-zinc-950 text-base" />
-          </div>
-
           <Button data-testid="submit-order-button" type="submit" disabled={saving || !lines.length}
             className="h-14 w-full rounded-full bg-[#007AFF] text-base font-semibold text-white hover:bg-[#0069DB]">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : `Kirim Booking · ${totalQty} pcs`}
@@ -175,7 +165,7 @@ export default function Checkout() {
 
         <div data-testid="cart-summary" className="h-fit space-y-6 rounded-2xl border border-white/10 bg-zinc-900 p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="font-heading text-2xl font-semibold tracking-tight">List Alat</h2>
+            <h2 className="font-heading text-2xl font-semibold tracking-tight">List Peminjaman</h2>
             <div className="flex items-center gap-3">
               {lines.length > 0 && (
                 <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
